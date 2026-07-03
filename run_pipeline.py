@@ -31,8 +31,7 @@ VIDEOS_DIR = OUTPUT_DIR / "videos"
 
 AGNES_API = "https://apihub.agnes-ai.com/v1"
 AGNES_ROOT = "https://apihub.agnes-ai.com"
-AGNES_KEY = os.environ.get("AGNES_API_KEY",
-    "cpk-ZrXnVGxXRJ4f2WFUMLxM1LNoJBboLedssp5gXJewIZrOZvYu")
+AGNES_KEY = os.environ.get("AGNES_API_KEY", "")
 AGNES_IMG_MODEL = "agnes-image-2.1-flash"
 AGNES_VIDEO_MODEL = "agnes-video-v2.0"
 AGNES_TEXT_MODEL = "agnes-2.0-flash"
