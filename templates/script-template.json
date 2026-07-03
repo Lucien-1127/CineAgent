@@ -1,0 +1,48 @@
+# 📄 Script Package JSON 範本
+
+```json
+{
+  "run_id": "a1b2c3d4",
+  "theme": "主題描述",
+  "total_scenes": 3,
+  "scenes": [
+    {
+      "scene_id": 0,
+      "scene_title": "場景標題",
+      "scene_goal": "場景目標描述",
+      "visual_style": "視覺風格",
+      "image_prompt": "英文圖片提示詞（給 Agnes Image 2.1 Flash）",
+      "video_prompt": "英文動態描述（給 Agnes Video 2.0）",
+      "transition_rule": "dissolve/cut/wipe/morph",
+      "duration_seconds": 10,
+      "width": 768,
+      "height": 1152,
+      "beat_order": 1,
+      "emotion": "平靜/緊張/爆發/收束",
+      "camera_angle": "低角度/平視/俯視/跟拍",
+      "sound_hint": "環境音/對白/配樂提示"
+    }
+  ]
+}
+```
+
+## 場景欄位說明
+
+| 欄位 | 必要 | 說明 |
+|------|------|------|
+| scene_id | ✅ | 0-based 整數編號 |
+| scene_title | ✅ | 場景標題 |
+| scene_goal | ✅ | 這個場景要傳達什麼訊息/情感 |
+| visual_style | ✅ | 視覺風格（用於保持跨場景一致性） |
+| character_card | ✅ | 角色描述卡（性別/年齡/服裝/髮型/特徵） — 用於一致性 |
+| image_prompt | ✅ | 英文提示詞（Agnes Image 2.1 Flash） |
+| image_negative_prompt | 建議 | 圖片負面提示詞 |
+| video_prompt | ✅ | 英文動態描述（Agnes Video 2.0） |
+| video_negative_prompt | 建議 | 影片負面提示詞 |
+| transition_rule | ✅ | dissolve/cut/wipe/morph |
+| duration_seconds | ✅ | 5-15 秒 |
+| width/height | ✅ | 解析度（預設 768x1152 9:16） |
+| beat_order | 建議 | 在節奏表中的順序（1-based） |
+| emotion | 建議 | 預期情緒 |
+| camera_angle | 建議 | 鏡頭角度 |
+| sound_hint | 可選 | 聲音提示 |

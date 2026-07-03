@@ -1,0 +1,28 @@
+# Output
+output/scenes/*
+output/videos/*
+output/*.json
+!output/.gitkeep
+
+# Environment
+.env
+venv/
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+
+# State files
+agents_workflow_state.json
+scene_prompts.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
