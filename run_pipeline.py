@@ -1,25 +1,24 @@
 #!/usr/bin/env python3
 """
-run_pipeline.py v3.3 — Real Frame Chaining via ffmpeg + 3-tier upload fallback
+run_pipeline.py v3.4 — Agnes API spec alignment
 
-Fixed from v3.2:
-- ✅ Frame Chaining 真正實作：ffmpeg 抽末幀 JPEG，而非偽代理影片 URL
-- ✅ 三層降級上傳策略：
-    ① Agnes /v1/images/uploads (multipart) — 原生端點
-    ② imgbb API (base64)                   — 免費備援
-    ③ Prompt-only chaining                 — 最終降級（不影響主流程）
-- ✅ extract_last_frame() 純 subprocess，無額外依賴
-- ✅ upload_frame_image() 管理三層降級，回傳可用圖片 URL 或 None
-- ✅ last_frame_urls 現在存真實圖片 URL，不再是影片 URL 代理
+Fixed from v3.3:
+- ✅ generate_image(): 加入 extra_body.response_format="url"（官方文件規定，
+     不可放頂層，否則 API 回傳錯誤）
+- ✅ generate_image(): 支援 img2img (reference_images)，透過 extra_body.image 傳入
+- ✅ generate_video(): 移除非官方欄位 guidance_scale / motion_bucket_id / end_image
+     改用官方支援的 seed + negative_prompt
+- ✅ generate_multi_image_video(): 同上移除非官方欄位，改用 seed + negative_prompt
+- ✅ poll_video(): URL 提取新增 remixed_from_video_id（官方完成影片 URL 欄位）
+- ✅ QUALITY_PRESETS 改為 num_inference_steps (官方支援欄位)
 
-From v3.2 (保留):
+From v3.3 (保留):
+- ✅ Frame Chaining 真正實作：ffmpeg 抽末幀 JPEG
+- ✅ 三層降級上傳策略：Agnes / imgbb / prompt-only
+- ✅ extract_last_frame() / upload_frame_image()
 - ✅ import re 移至頂部
-- ✅ 刪除 v2 殘留死代碼
-- ✅ poll_video URL 提取修正
-- ✅ Frame Chaining end_image 欄位（422 自動降級）
 - ✅ image/video_prompt 一致性種子 token
 - ✅ Coherence Pass character_card 統一
-- ✅ guidance_scale / motion_bucket_id 品質預設
 - ✅ --quality flag：fast / balanced / cinematic
 """
 
@@ -57,7 +56,6 @@ AGNES_VIDEO_MODEL = "agnes-video-v2.0"
 AGNES_TEXT_MODEL = "agnes-2.0-flash"
 
 # imgbb — 免費圖片託管，Frame Chaining 備援上傳
-# 取得方式：https://api.imgbb.com/ 免費帳號，key 存入環境變數
 IMGBB_KEY = os.environ.get("IMGBB_API_KEY", "")
 
 # Quotas
@@ -81,10 +79,12 @@ RES_9_16 = {
 }
 
 # ── Quality Presets ──
+# 官方支援欄位：num_inference_steps（官方文件 /v1/videos 參數表）
+# guidance_scale / motion_bucket_id 為非官方欄位，已移除
 QUALITY_PRESETS = {
-    "fast":     {"guidance_scale": 2.5, "motion_bucket_id": 127},
-    "balanced": {"guidance_scale": 3.5, "motion_bucket_id": 80},
-    "cinematic":{"guidance_scale": 5.0, "motion_bucket_id": 50},
+    "fast":     {"num_inference_steps": 20},
+    "balanced": {"num_inference_steps": 30},
+    "cinematic":{"num_inference_steps": 50},
 }
 
 # ── Negative Prompt Defaults ──
@@ -137,18 +137,16 @@ def extract_last_frame(video_url: str, scene_id: int) -> Optional[Path]:
     # Step 2: 抽末幀
     try:
         if duration and duration > 0.5:
-            # 精確 seek：距結尾 0.1s
             seek_ts = max(0.0, duration - 0.1)
             cmd = [
                 "ffmpeg", "-y",
                 "-ss", str(seek_ts),
                 "-i", video_url,
                 "-vframes", "1",
-                "-q:v", "2",       # JPEG 品質 (1=最高, 31=最低)
+                "-q:v", "2",
                 str(out_path),
             ]
         else:
-            # Fallback：sseof（從結尾往前讀）
             cmd = [
                 "ffmpeg", "-y",
                 "-sseof", "-0.5",
@@ -189,13 +187,11 @@ async def upload_frame_image(frame_path: Path, agnes_client: httpx.AsyncClient) 
     try:
         resp = await agnes_client.post(
             "/images/uploads",
-            content=None,  # 替換為 multipart
-            headers={},    # 先探測端點是否存在
+            content=None,
+            headers={},
         )
-        # 若端點存在且支援 multipart，重新發送
         if resp.status_code not in (404, 405, 501):
             files = {"file": (frame_path.name, jpeg_bytes, "image/jpeg")}
-            # 移除 Content-Type header（讓 httpx 自動設 multipart boundary）
             upload_headers = {
                 k: v for k, v in agnes_client.headers.items()
                 if k.lower() != "content-type"
@@ -239,7 +235,6 @@ async def upload_frame_image(frame_path: Path, agnes_client: httpx.AsyncClient) 
     else:
         print(f"     ℹ️  IMGBB_API_KEY 未設定，跳過 imgbb 備援")
 
-    # ── 層級③ 降級：回傳 None，呼叫端改用 prompt 橋接 ──
     print(f"     ⚠️ 所有上傳管道失敗，Frame Chaining 降級為 prompt 橋接")
     return None
 
@@ -272,7 +267,7 @@ class PipelineState:
         self.failed_scenes = []
         self.image_urls = {}       # str(scene_idx) -> url
         self.video_urls = {}       # str(scene_idx) -> url
-        self.last_frame_urls = {}  # str(scene_idx) -> 真實末幀圖片 URL (v3.3 修正)
+        self.last_frame_urls = {}  # str(scene_idx) -> 真實末幀圖片 URL
         self.quota_used_seconds = 0
         self.retry_count = 0
         self.fallback_used = False
@@ -324,16 +319,34 @@ class AgnesAPI:
                 await asyncio.sleep(2 ** attempt)
         raise RuntimeError("Chat API failed after 4 attempts")
 
-    async def generate_image(self, prompt: str, size: str = "1024x1792") -> Optional[str]:
-        """生圖，回傳 URL。9:16 直式建議 1024x1792"""
+    async def generate_image(
+        self,
+        prompt: str,
+        size: str = "1024x1792",
+        reference_images: Optional[list] = None,
+    ) -> Optional[str]:
+        """
+        生圖，回傳 URL。
+
+        Fix v3.4:
+        - response_format 必須放在 extra_body 內，不可放頂層（官方文件規定）
+        - img2img 模式：reference_images 放入 extra_body.image
+        """
         for attempt in range(4):
             try:
-                resp = await self.client.post("/images/generations", json={
+                extra_body: dict = {"response_format": "url"}
+                if reference_images:
+                    # img2img 模式：傳入參考圖片 URL 陣列
+                    extra_body["image"] = reference_images
+
+                payload = {
                     "model": AGNES_IMG_MODEL,
                     "prompt": prompt,
-                    "n": 1,
                     "size": size,
-                })
+                    "extra_body": extra_body,
+                }
+
+                resp = await self.client.post("/images/generations", json=payload)
                 if resp.status_code == 429:
                     await asyncio.sleep(2 ** attempt)
                     continue
@@ -352,13 +365,16 @@ class AgnesAPI:
         height: int = 1152,
         quality: str = "balanced",
         anchor_image_url: Optional[str] = None,
+        seed: Optional[int] = None,
     ) -> Optional[str]:
         """
         提交 I2V 影片任務，回傳 video_id。
 
-        anchor_image_url: 前一鏡真實末幀圖片 URL（v3.3 起為真實 JPEG，非影片 URL）。
-                          若 API 支援 end_image 欄位則傳入，否則注入 prompt 橋接。
-        quality: fast / balanced / cinematic。
+        Fix v3.4:
+        - 移除非官方欄位：guidance_scale, motion_bucket_id, end_image
+        - 改用官方支援：num_inference_steps, negative_prompt, seed
+        - anchor_image_url (Frame Chaining) 現在透過 extra_body.image 傳入
+          （官方 keyframes 模式），同時在 prompt 附加橋接提示
         """
         nf, fr, res_label = DURATION_PRESETS.get(duration, DURATION_PRESETS[5])
         res = RES_9_16.get(res_label, RES_9_16["720p"])
@@ -379,18 +395,28 @@ class AgnesAPI:
             "frame_rate": fr,
             "width": width or res["width"],
             "height": height or res["height"],
-            "guidance_scale": qp["guidance_scale"],
-            "motion_bucket_id": qp["motion_bucket_id"],
+            "num_inference_steps": qp["num_inference_steps"],
+            "negative_prompt": VID_NEG_DEFAULT,
         }
 
+        if seed is not None:
+            payload["seed"] = seed
+
+        # Frame Chaining：用 keyframes 模式傳入首尾參考幀
         if anchor_image_url:
-            payload["end_image"] = anchor_image_url
+            payload["mode"] = "keyframes"
+            payload["extra_body"] = {
+                "image": [anchor_image_url, image_url]
+            }
 
         for attempt in range(4):
             try:
                 resp = await self.client.post("/videos", json=payload)
-                if resp.status_code == 422:
-                    payload.pop("end_image", None)
+                if resp.status_code == 422 and "mode" in payload:
+                    # keyframes 模式不支援時降級為標準 i2v + prompt 橋接
+                    print(f"     ⚠️ keyframes 模式 422，降級為標準 i2v + prompt 橋接")
+                    payload.pop("mode", None)
+                    payload.pop("extra_body", None)
                     resp = await self.client.post("/videos", json=payload)
                 if resp.status_code == 429:
                     await asyncio.sleep(2 ** attempt)
@@ -413,7 +439,11 @@ class AgnesAPI:
         duration: int = 5,
         quality: str = "balanced",
     ) -> Optional[str]:
-        """多圖轉場 — 用 extra_body.image 陣列達到場景平滑過渡"""
+        """
+        多圖轉場 — 用 extra_body.image 陣列達到場景平滑過渡
+
+        Fix v3.4: 移除非官方欄位 guidance_scale / motion_bucket_id
+        """
         nf, fr, res_label = DURATION_PRESETS.get(duration, DURATION_PRESETS[5])
         res = RES_9_16.get(res_label, RES_9_16["720p"])
         qp = QUALITY_PRESETS.get(quality, QUALITY_PRESETS["balanced"])
@@ -425,8 +455,8 @@ class AgnesAPI:
             "frame_rate": fr,
             "width": res["width"],
             "height": res["height"],
-            "guidance_scale": qp["guidance_scale"],
-            "motion_bucket_id": qp["motion_bucket_id"],
+            "num_inference_steps": qp["num_inference_steps"],
+            "negative_prompt": VID_NEG_DEFAULT,
             "extra_body": {
                 "image": image_urls,
             },
@@ -448,7 +478,9 @@ class AgnesAPI:
     async def poll_video(self, video_id: str, timeout: int = 300) -> Optional[str]:
         """
         輪詢影片結果，回傳最終影片 URL。
-        Fix v3.2: 正確優先級 url > output.url > video_url > download_url
+
+        Fix v3.4: 新增 remixed_from_video_id 到 URL 提取優先序列
+                  （官方完成影片 URL 欄位，參見 Agnes Video V2 API 文件）
         """
         start = time.time()
         polling_url = f"{AGNES_ROOT}/agnesapi"
@@ -465,7 +497,8 @@ class AgnesAPI:
                     status = data.get("status", "")
                     if status == "completed":
                         url = (
-                            data.get("url")
+                            data.get("remixed_from_video_id")   # v3.4 新增：官方完成影片 URL 欄位
+                            or data.get("url")
                             or (data.get("output") or {}).get("url")
                             or data.get("video_url")
                             or data.get("download_url")
@@ -772,7 +805,7 @@ async def write_script_v3(
 # ══════════════════════════════════════════════════
 
 async def main():
-    parser = argparse.ArgumentParser(description="CineAgent Pipeline v3.3")
+    parser = argparse.ArgumentParser(description="CineAgent Pipeline v3.4")
     parser.add_argument("--reset", action="store_true", help="重置狀態")
     parser.add_argument("--scenes", type=int, default=3, help="分鏡數")
     parser.add_argument("--duration", type=int, default=10, help="每場景秒數(5-15)")
@@ -866,6 +899,8 @@ async def main():
                 full_prompt = enhanced_prompt
                 if neg_prompt:
                     full_prompt = f"{enhanced_prompt} | negative: {neg_prompt}"
+
+                # v3.4: generate_image 已內建 extra_body.response_format="url"
                 url = await api.generate_image(full_prompt, size="1024x1792")
                 if url:
                     state.image_urls[si] = url
@@ -876,7 +911,11 @@ async def main():
                     "scene_id": i,
                     "model": AGNES_IMG_MODEL,
                     "endpoint": "/v1/images/generations",
-                    "request_body": {"prompt": full_prompt, "size": "1024x1792"},
+                    "request_body": {
+                        "prompt": full_prompt,
+                        "size": "1024x1792",
+                        "extra_body": {"response_format": "url"},
+                    },
                     "status": "completed" if url else "failed",
                     "image_url": url or "",
                 })
@@ -915,24 +954,25 @@ async def main():
                     duration=args.duration,
                     quality=args.quality,
                 )
+                url = None
                 if video_id:
                     print("  ⏳ Polling multi-image video...")
                     url = await api.poll_video(video_id, timeout=300)
                     if url:
                         state.video_urls["0"] = url
                         state.quota_used_seconds += args.duration
-                    video_jobs["jobs"].append({
-                        "scene_id": "all",
-                        "model": AGNES_VIDEO_MODEL,
-                        "endpoint": "/v1/videos",
-                        "mode": "multi-image",
-                        "quality": args.quality,
-                        "video_id": video_id,
-                        "status": "completed" if url else "failed",
-                        "output_url": url or "",
-                    })
+                video_jobs["jobs"].append({
+                    "scene_id": "all",
+                    "model": AGNES_VIDEO_MODEL,
+                    "endpoint": "/v1/videos",
+                    "mode": "multi-image",
+                    "quality": args.quality,
+                    "video_id": video_id,
+                    "status": "completed" if url else "failed",
+                    "output_url": url or "",
+                })
             else:
-                # Individual I2V per scene with REAL Frame Chaining (v3.3)
+                # Individual I2V per scene with REAL Frame Chaining (v3.3+)
                 for i, img_url in enumerate(image_list):
                     si = str(i)
                     if si in state.video_urls:
@@ -943,7 +983,6 @@ async def main():
                           f"({args.duration}s, quality={args.quality})")
                     dur = min(scene.get("duration_seconds", args.duration), 15)
 
-                    # v3.3 Frame Chaining：使用真實末幀圖片 URL（非影片 URL 代理）
                     prev_last_frame = state.last_frame_urls.get(str(i - 1)) if i > 0 else None
                     if i > 0:
                         if prev_last_frame:
@@ -967,14 +1006,12 @@ async def main():
                             state.video_urls[si] = url
                             state.quota_used_seconds += dur
 
-                            # v3.3 核心修正：ffmpeg 抽末幀 + 三層上傳降級
                             print(f"     🎞️ 抽取末幀用於下一場景 Frame Chaining...")
                             real_frame_url = await get_last_frame_url(url, i, api.client)
                             if real_frame_url:
                                 state.last_frame_urls[si] = real_frame_url
                                 print(f"     ✅ last_frame_urls[{i}] = 真實圖片 URL")
                             else:
-                                # 末幀抽取失敗：不存入 last_frame_urls，下一鏡降級為 prompt 橋接
                                 print(f"     ⚠️  末幀抽取失敗，scene {i+1} 將使用 prompt 橋接")
 
                     video_jobs["jobs"].append({
