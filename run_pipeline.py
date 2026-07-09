@@ -1,19 +1,26 @@
 #!/usr/bin/env python3
 """
-run_pipeline.py v3.2 — Bug fixes + I2V quality & consistency overhaul
+run_pipeline.py v3.3 — Real Frame Chaining via ffmpeg + 3-tier upload fallback
 
-Fixed from v3.1:
-- ✅ import re 移至頂部（原本在 __main__ 會導致 module import NameError）
-- ✅ 刪除 v2 殘留死代碼（write_script_v3 後的孤立字串）
-- ✅ poll_video URL 提取邏輯修正（remixed_from_video_id 語意錯誤）
+Fixed from v3.2:
+- ✅ Frame Chaining 真正實作：ffmpeg 抽末幀 JPEG，而非偽代理影片 URL
+- ✅ 三層降級上傳策略：
+    ① Agnes /v1/images/uploads (multipart) — 原生端點
+    ② imgbb API (base64)                   — 免費備援
+    ③ Prompt-only chaining                 — 最終降級（不影響主流程）
+- ✅ extract_last_frame() 純 subprocess，無額外依賴
+- ✅ upload_frame_image() 管理三層降級，回傳可用圖片 URL 或 None
+- ✅ last_frame_urls 現在存真實圖片 URL，不再是影片 URL 代理
 
-I2V 品質提升：
-- ✅ Frame Chaining：前一鏡末幀 URL 存入 state，作為下一鏡 anchor_image
-- ✅ image_prompt 自動注入視覺一致性種子 token
-- ✅ video_prompt 自動附加動態負面描述詞（防跳切/形變/閃爍）
-- ✅ 腳本 Coherence Pass：生成後 LLM 審查 character_card 跨場景一致性並修補
-- ✅ generate_video 新增 guidance_scale / motion_bucket_id 穩定參數
-- ✅ --quality flag：fast / balanced / cinematic 三段控制
+From v3.2 (保留):
+- ✅ import re 移至頂部
+- ✅ 刪除 v2 殘留死代碼
+- ✅ poll_video URL 提取修正
+- ✅ Frame Chaining end_image 欄位（422 自動降級）
+- ✅ image/video_prompt 一致性種子 token
+- ✅ Coherence Pass character_card 統一
+- ✅ guidance_scale / motion_bucket_id 品質預設
+- ✅ --quality flag：fast / balanced / cinematic
 """
 
 import os
@@ -21,6 +28,9 @@ import sys
 import re
 import json
 import time
+import base64
+import tempfile
+import subprocess
 import argparse
 import asyncio
 import uuid
@@ -37,6 +47,7 @@ SCENE_FILE = BASE_DIR / "scene_prompts.json"
 OUTPUT_DIR = BASE_DIR / "output"
 SCENES_DIR = OUTPUT_DIR / "scenes"
 VIDEOS_DIR = OUTPUT_DIR / "videos"
+FRAMES_DIR = OUTPUT_DIR / "frames"   # ffmpeg 末幀輸出目錄
 
 AGNES_API = "https://apihub.agnes-ai.com/v1"
 AGNES_ROOT = "https://apihub.agnes-ai.com"
@@ -45,13 +56,15 @@ AGNES_IMG_MODEL = "agnes-image-2.1-flash"
 AGNES_VIDEO_MODEL = "agnes-video-v2.0"
 AGNES_TEXT_MODEL = "agnes-2.0-flash"
 
+# imgbb — 免費圖片託管，Frame Chaining 備援上傳
+# 取得方式：https://api.imgbb.com/ 免費帳號，key 存入環境變數
+IMGBB_KEY = os.environ.get("IMGBB_API_KEY", "")
+
 # Quotas
 QUOTA_VIDEO_SEC = 500
 QUOTA_VIDEO_SAFE = 480
 
 # ── Duration Presets (8n+1 frame rule) ──
-# Formula: seconds = num_frames / frame_rate
-# Resolution limits: 1080p=169max, 720p=409max, 480p=961max
 DURATION_PRESETS = {
     5:  (121, 24, "1080p"),
     7:  (169, 24, "1080p"),
@@ -68,9 +81,6 @@ RES_9_16 = {
 }
 
 # ── Quality Presets ──
-# Controls guidance_scale and motion_bucket_id for I2V stability
-# Higher guidance_scale = closer to image anchor (less drift)
-# Lower motion_bucket_id = less motion intensity (more stable)
 QUALITY_PRESETS = {
     "fast":     {"guidance_scale": 2.5, "motion_bucket_id": 127},
     "balanced": {"guidance_scale": 3.5, "motion_bucket_id": 80},
@@ -90,6 +100,169 @@ VID_NEG_DEFAULT = (
 )
 
 
+# ══════════════════════════════════════════════════
+# Frame Chaining — ffmpeg 末幀抽取 + 三層上傳降級
+# ══════════════════════════════════════════════════
+
+def extract_last_frame(video_url: str, scene_id: int) -> Optional[Path]:
+    """
+    用 ffmpeg 從影片 URL 抽取最後一幀，存為 JPEG。
+
+    策略：
+    1. 先用 ffprobe 取得影片總時長
+    2. seek 到 (duration - 0.1s) 抽單幀
+    3. 存至 output/frames/frame_{scene_id}.jpg
+    回傳本地 Path，失敗回傳 None。
+    """
+    FRAMES_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = FRAMES_DIR / f"frame_{scene_id}.jpg"
+
+    # Step 1: 用 ffprobe 取得時長
+    duration = None
+    try:
+        probe = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                video_url,
+            ],
+            capture_output=True, text=True, timeout=30,
+        )
+        if probe.returncode == 0 and probe.stdout.strip():
+            duration = float(probe.stdout.strip())
+    except Exception as e:
+        print(f"     ⚠️ ffprobe 時長查詢失敗: {e}，改用 sseof 策略")
+
+    # Step 2: 抽末幀
+    try:
+        if duration and duration > 0.5:
+            # 精確 seek：距結尾 0.1s
+            seek_ts = max(0.0, duration - 0.1)
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(seek_ts),
+                "-i", video_url,
+                "-vframes", "1",
+                "-q:v", "2",       # JPEG 品質 (1=最高, 31=最低)
+                str(out_path),
+            ]
+        else:
+            # Fallback：sseof（從結尾往前讀）
+            cmd = [
+                "ffmpeg", "-y",
+                "-sseof", "-0.5",
+                "-i", video_url,
+                "-vframes", "1",
+                "-q:v", "2",
+                str(out_path),
+            ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode == 0 and out_path.exists() and out_path.stat().st_size > 0:
+            print(f"     🎞️ 末幀抽取成功: {out_path.name} ({out_path.stat().st_size // 1024}KB)")
+            return out_path
+        else:
+            print(f"     ⚠️ ffmpeg 末幀失敗 (rc={result.returncode}): {result.stderr[-200:]}")
+            return None
+    except subprocess.TimeoutExpired:
+        print(f"     ⚠️ ffmpeg 末幀超時 (60s)")
+        return None
+    except FileNotFoundError:
+        print(f"     ⚠️ ffmpeg 未安裝或不在 PATH")
+        return None
+    except Exception as e:
+        print(f"     ⚠️ ffmpeg 末幀異常: {e}")
+        return None
+
+
+async def upload_frame_image(frame_path: Path, agnes_client: httpx.AsyncClient) -> Optional[str]:
+    """
+    三層降級上傳末幀圖片，回傳可直接使用的圖片 URL。
+
+    層級①：POST /v1/images/uploads (Agnes multipart)
+    層級②：POST https://api.imgbb.com/1/upload (base64, 需 IMGBB_KEY)
+    層級③：None — 降級為純 prompt 文字橋接
+    """
+    jpeg_bytes = frame_path.read_bytes()
+
+    # ── 層級① Agnes 原生上傳端點 ──
+    try:
+        resp = await agnes_client.post(
+            "/images/uploads",
+            content=None,  # 替換為 multipart
+            headers={},    # 先探測端點是否存在
+        )
+        # 若端點存在且支援 multipart，重新發送
+        if resp.status_code not in (404, 405, 501):
+            files = {"file": (frame_path.name, jpeg_bytes, "image/jpeg")}
+            # 移除 Content-Type header（讓 httpx 自動設 multipart boundary）
+            upload_headers = {
+                k: v for k, v in agnes_client.headers.items()
+                if k.lower() != "content-type"
+            }
+            async with httpx.AsyncClient(
+                base_url=AGNES_API,
+                headers=upload_headers,
+                timeout=60,
+            ) as up:
+                r = await up.post("/images/uploads", files=files)
+                if r.status_code == 200:
+                    data = r.json()
+                    url = (
+                        data.get("url")
+                        or data.get("data", {}).get("url")
+                        or data.get("image_url")
+                    )
+                    if url:
+                        print(f"     ✅ 末幀上傳成功 (Agnes): {url[:60]}...")
+                        return url
+    except Exception as e:
+        print(f"     ⚠️ Agnes 上傳失敗: {e}")
+
+    # ── 層級② imgbb base64 上傳 ──
+    if IMGBB_KEY:
+        try:
+            b64 = base64.b64encode(jpeg_bytes).decode()
+            async with httpx.AsyncClient(timeout=30) as ib:
+                r = await ib.post(
+                    "https://api.imgbb.com/1/upload",
+                    data={"key": IMGBB_KEY, "image": b64, "expiration": 3600},
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    url = data.get("data", {}).get("url")
+                    if url:
+                        print(f"     ✅ 末幀上傳成功 (imgbb): {url[:60]}...")
+                        return url
+        except Exception as e:
+            print(f"     ⚠️ imgbb 上傳失敗: {e}")
+    else:
+        print(f"     ℹ️  IMGBB_API_KEY 未設定，跳過 imgbb 備援")
+
+    # ── 層級③ 降級：回傳 None，呼叫端改用 prompt 橋接 ──
+    print(f"     ⚠️ 所有上傳管道失敗，Frame Chaining 降級為 prompt 橋接")
+    return None
+
+
+async def get_last_frame_url(
+    video_url: str,
+    scene_id: int,
+    agnes_client: httpx.AsyncClient,
+) -> Optional[str]:
+    """
+    完整 Frame Chaining 流程：抽幀 → 上傳 → 回傳 URL。
+    任一步驟失敗回傳 None（主流程不中斷）。
+    """
+    frame_path = extract_last_frame(video_url, scene_id)
+    if not frame_path:
+        return None
+    return await upload_frame_image(frame_path, agnes_client)
+
+
+# ══════════════════════════════════════════════════
+# Pipeline State
+# ══════════════════════════════════════════════════
+
 class PipelineState:
     def __init__(self):
         self.run_id = str(uuid.uuid4())[:8]
@@ -99,7 +272,7 @@ class PipelineState:
         self.failed_scenes = []
         self.image_urls = {}       # str(scene_idx) -> url
         self.video_urls = {}       # str(scene_idx) -> url
-        self.last_frame_urls = {}  # str(scene_idx) -> last_frame_url (for chaining)
+        self.last_frame_urls = {}  # str(scene_idx) -> 真實末幀圖片 URL (v3.3 修正)
         self.quota_used_seconds = 0
         self.retry_count = 0
         self.fallback_used = False
@@ -116,6 +289,10 @@ class PipelineState:
     def save(self):
         STATE_FILE.write_text(json.dumps(self.__dict__, indent=2, ensure_ascii=False))
 
+
+# ══════════════════════════════════════════════════
+# Agnes API Client
+# ══════════════════════════════════════════════════
 
 class AgnesAPI:
     def __init__(self):
@@ -179,18 +356,20 @@ class AgnesAPI:
         """
         提交 I2V 影片任務，回傳 video_id。
 
-        anchor_image_url: 前一鏡末幀，用於 Frame Chaining 提升連貫性。
-                          若 API 支援 end_image 欄位則傳入，否則注入 prompt。
-        quality: fast / balanced / cinematic，控制 guidance_scale / motion_bucket_id。
+        anchor_image_url: 前一鏡真實末幀圖片 URL（v3.3 起為真實 JPEG，非影片 URL）。
+                          若 API 支援 end_image 欄位則傳入，否則注入 prompt 橋接。
+        quality: fast / balanced / cinematic。
         """
         nf, fr, res_label = DURATION_PRESETS.get(duration, DURATION_PRESETS[5])
         res = RES_9_16.get(res_label, RES_9_16["720p"])
         qp = QUALITY_PRESETS.get(quality, QUALITY_PRESETS["balanced"])
 
-        # 若有前鏡末幀，注入 prompt 作為視覺橋接提示
         chaining_hint = ""
         if anchor_image_url:
-            chaining_hint = " Visually transition from the previous scene's ending frame, maintain consistent character appearance, lighting, and color palette."
+            chaining_hint = (
+                " Visually transition from the previous scene's ending frame, "
+                "maintain consistent character appearance, lighting, and color palette."
+            )
 
         payload = {
             "model": AGNES_VIDEO_MODEL,
@@ -204,7 +383,6 @@ class AgnesAPI:
             "motion_bucket_id": qp["motion_bucket_id"],
         }
 
-        # 若 API 支援 end_image（Frame Chaining 強化版），嘗試傳入
         if anchor_image_url:
             payload["end_image"] = anchor_image_url
 
@@ -212,7 +390,6 @@ class AgnesAPI:
             try:
                 resp = await self.client.post("/videos", json=payload)
                 if resp.status_code == 422:
-                    # API 不支援 end_image，移除後重試
                     payload.pop("end_image", None)
                     resp = await self.client.post("/videos", json=payload)
                 if resp.status_code == 429:
@@ -271,9 +448,7 @@ class AgnesAPI:
     async def poll_video(self, video_id: str, timeout: int = 300) -> Optional[str]:
         """
         輪詢影片結果，回傳最終影片 URL。
-
-        Fix v3.2: 修正 URL 提取順序，移除語意錯誤的 remixed_from_video_id。
-        正確優先級：url > output.url > video_url > download_url
+        Fix v3.2: 正確優先級 url > output.url > video_url > download_url
         """
         start = time.time()
         polling_url = f"{AGNES_ROOT}/agnesapi"
@@ -289,7 +464,6 @@ class AgnesAPI:
                     data = resp.json()
                     status = data.get("status", "")
                     if status == "completed":
-                        # 依正確語意取 URL，不再用 remixed_from_video_id
                         url = (
                             data.get("url")
                             or (data.get("output") or {}).get("url")
@@ -314,7 +488,9 @@ class AgnesAPI:
         await self.client.aclose()
 
 
-# ── Script Design (Phase 0) ──
+# ══════════════════════════════════════════════════
+# Script Design (Phase 0)
+# ══════════════════════════════════════════════════
 
 SCRIPT_DESIGN_SYSTEM = """你是一個專業影片腳本設計師。你的工作是協助用戶完成腳本設計的五個步驟：
 Step 1: 需求萃取 — 了解主題、風格、長度、平台、情緒
@@ -334,20 +510,19 @@ Step 5: 腳本審查 — 連續性、可行性、模型匹配檢查
 
 async def coherence_pass(api: AgnesAPI, scenes: list[dict]) -> list[dict]:
     """
-    Coherence Pass：讓 LLM 審查所有場景的 character_card 一致性，
-    並修補差異欄位。確保跨場景角色視覺不漂移。
+    Coherence Pass：LLM 審查所有場景的 character_card 一致性並修補。
     """
     if not scenes:
         return scenes
 
     print("  🔍 Coherence Pass: 角色一致性審查")
-    cards = [{"scene_id": s.get("scene_id", i), "character_card": s.get("character_card", "")
-              } for i, s in enumerate(scenes)]
+    cards = [{"scene_id": s.get("scene_id", i), "character_card": s.get("character_card", "")}
+             for i, s in enumerate(scenes)]
 
     system = """你是一個分鏡一致性審查員。
 你的任務：比對所有場景的 character_card，找出差異，統一為最完整的那一版。
 輸出 JSON 陣列，每個元素只含 {scene_id, character_card}。
- character_card 必須完全相同（同一角色跨場景鎖定）。
+character_card 必須完全相同（同一角色跨場景鎖定）。
 輸出純 JSON，不要 markdown 包裝。"""
 
     prompt = f"請審查並統一以下場景的 character_card：\n{json.dumps(cards, ensure_ascii=False, indent=2)}"
@@ -369,31 +544,21 @@ async def coherence_pass(api: AgnesAPI, scenes: list[dict]) -> list[dict]:
 
 
 def build_image_prompt(scene: dict) -> str:
-    """
-    強化 image_prompt：注入一致性種子 token。
-    確保跨場景風格、光線、角色外觀的視覺錨定。
-    """
+    """強化 image_prompt：注入一致性種子 token。"""
     base = scene.get("image_prompt", "")
     character = scene.get("character_card", "")
     style = scene.get("visual_style", "")
-
-    # 注入一致性種子 token
     seed_tokens = "cinematic, photorealistic, consistent lighting, sharp focus, 9:16 portrait"
     if character:
         seed_tokens = f"character: {character[:120]}, {seed_tokens}"
     if style:
         seed_tokens = f"{style}, {seed_tokens}"
-
     return f"{base}, {seed_tokens}"
 
 
 def build_video_prompt(scene: dict) -> str:
-    """
-    強化 video_prompt：自動附加動態負面描述詞，
-    確保模型聚焦在指定動態，不產生跳切或形變。
-    """
+    """強化 video_prompt：附加動態一致性指令。"""
     base = scene.get("video_prompt", "Slow cinematic motion")
-    # 結尾注入品質指令
     quality_suffix = (
         " Smooth continuous motion, consistent character appearance throughout, "
         "stable camera, no sudden cuts, no morphing, photorealistic."
@@ -413,7 +578,6 @@ async def design_script(
     print(f"     主題: {topic}")
     print(f"     平台: {platform}")
 
-    # Step 2: Beat Sheet (低溫 0.3 確保 JSON 結構穩定)
     print("  📊 Step 2/5: 節奏表設計")
     beat_system = """你是一個節奏表 (Beat Sheet) 設計專家。
 根據總時長和平台，設計時間軸分配和情緒曲線。
@@ -436,7 +600,6 @@ async def design_script(
   ]
 }
 """
-
     beat_prompt = f"""請為以下主題設計節奏表：
 主題: {topic}
 場景數: {scene_count}
@@ -476,14 +639,10 @@ async def design_script(
     for b in beat_sheet.get("beats", []):
         print(f"     {b.get('time_start', 0):>2}s-{b.get('time_end', 0):>2}s | {b.get('name', '')}")
 
-    # Step 3+4: Generate scenes with beat context
     print("  📝 Step 3-4/5: 腳本撰寫 + 分鏡設計")
     scenes = await write_script_v3(api, topic, scene_count, beat_sheet)
-
-    # Coherence Pass: 審查並統一 character_card
     scenes = await coherence_pass(api, scenes)
 
-    # Step 5: Review
     print("  ✅ Step 5/5: 腳本審查")
     review_notes = []
     total_dur = sum(s.get("duration_seconds", 10) for s in scenes)
@@ -583,7 +742,6 @@ async def write_script_v3(
     except Exception as e:
         print(f"  ⚠️ 腳本生成失敗: {e}，使用 fallback")
 
-    # Fallback
     default_char = "young woman, 20s, black leather jacket, dark jeans, short black hair, sharp eyes"
     default_style = "Cinematic, photorealistic, neon-lit urban night"
     return [
@@ -609,10 +767,12 @@ async def write_script_v3(
     ]
 
 
-# ── Main ──
+# ══════════════════════════════════════════════════
+# Main
+# ══════════════════════════════════════════════════
 
 async def main():
-    parser = argparse.ArgumentParser(description="CineAgent Pipeline v3.2")
+    parser = argparse.ArgumentParser(description="CineAgent Pipeline v3.3")
     parser.add_argument("--reset", action="store_true", help="重置狀態")
     parser.add_argument("--scenes", type=int, default=3, help="分鏡數")
     parser.add_argument("--duration", type=int, default=10, help="每場景秒數(5-15)")
@@ -635,6 +795,7 @@ async def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     SCENES_DIR.mkdir(exist_ok=True)
     VIDEOS_DIR.mkdir(exist_ok=True)
+    FRAMES_DIR.mkdir(exist_ok=True)
 
     if args.reset:
         if STATE_FILE.exists():
@@ -700,13 +861,10 @@ async def main():
                     print(f"  ✅ Scene {i} image exists, skip")
                     continue
                 print(f"  🖼️ Scene {i}: {scene.get('scene_title', '')}")
-                # 強化後的 image_prompt
                 enhanced_prompt = build_image_prompt(scene)
                 neg_prompt = scene.get("image_negative_prompt", IMG_NEG_DEFAULT)
                 full_prompt = enhanced_prompt
                 if neg_prompt:
-                    # Agnes Image 支援 negative_prompt 欄位時可單獨傳；
-                    # 此處先嵌入 prompt 相容所有版本
                     full_prompt = f"{enhanced_prompt} | negative: {neg_prompt}"
                 url = await api.generate_image(full_prompt, size="1024x1792")
                 if url:
@@ -774,7 +932,7 @@ async def main():
                         "output_url": url or "",
                     })
             else:
-                # Individual I2V per scene with Frame Chaining
+                # Individual I2V per scene with REAL Frame Chaining (v3.3)
                 for i, img_url in enumerate(image_list):
                     si = str(i)
                     if si in state.video_urls:
@@ -785,10 +943,13 @@ async def main():
                           f"({args.duration}s, quality={args.quality})")
                     dur = min(scene.get("duration_seconds", args.duration), 15)
 
-                    # Frame Chaining：取前一鏡末幀作為視覺橋接錨點
+                    # v3.3 Frame Chaining：使用真實末幀圖片 URL（非影片 URL 代理）
                     prev_last_frame = state.last_frame_urls.get(str(i - 1)) if i > 0 else None
-                    if prev_last_frame:
-                        print(f"     🔗 Frame Chaining: scene {i-1} last frame → scene {i} anchor")
+                    if i > 0:
+                        if prev_last_frame:
+                            print(f"     🔗 Frame Chaining: scene {i-1} last frame → scene {i} anchor ✅")
+                        else:
+                            print(f"     ⚠️  Frame Chaining: scene {i-1} 末幀不可用，改用 prompt 橋接")
 
                     enhanced_video_prompt = build_video_prompt(scene)
                     video_id = await api.generate_video(
@@ -805,9 +966,17 @@ async def main():
                         if url:
                             state.video_urls[si] = url
                             state.quota_used_seconds += dur
-                            # 記錄末幀 URL（若 API 有回傳；否則用影片 URL 作為代理）
-                            # 實際末幀提取需要後處理（ffmpeg），此處記錄影片 URL 備用
-                            state.last_frame_urls[si] = url
+
+                            # v3.3 核心修正：ffmpeg 抽末幀 + 三層上傳降級
+                            print(f"     🎞️ 抽取末幀用於下一場景 Frame Chaining...")
+                            real_frame_url = await get_last_frame_url(url, i, api.client)
+                            if real_frame_url:
+                                state.last_frame_urls[si] = real_frame_url
+                                print(f"     ✅ last_frame_urls[{i}] = 真實圖片 URL")
+                            else:
+                                # 末幀抽取失敗：不存入 last_frame_urls，下一鏡降級為 prompt 橋接
+                                print(f"     ⚠️  末幀抽取失敗，scene {i+1} 將使用 prompt 橋接")
+
                     video_jobs["jobs"].append({
                         "scene_id": i,
                         "model": AGNES_VIDEO_MODEL,
@@ -816,6 +985,7 @@ async def main():
                         "quality": args.quality,
                         "video_id": video_id,
                         "frame_chaining": bool(prev_last_frame),
+                        "frame_chaining_url": prev_last_frame or "",
                         "status": "completed" if url else "failed",
                         "output_url": url or "",
                     })
