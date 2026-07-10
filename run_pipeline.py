@@ -94,8 +94,11 @@ IMG_NEG_DEFAULT = (
     "text, logo, overexposed, underexposed"
 )
 VID_NEG_DEFAULT = (
-    "blurry, flickering, inconsistent character, morphing face, "
-    "jump cut, teleportation, color shift, frame duplication, "
+    "different character, face change, identity change, face morphing, "
+    "different body shape, different color, appearance drift, "
+    "character mutation, swapped identity, face distortion, "
+    "inconsistent appearance, blurry, flickering, jump cut, "
+    "teleportation, color shift, frame duplication, "
     "cartoon, cgi, watermark, text"
 )
 
@@ -525,19 +528,33 @@ class AgnesAPI:
 # Script Design (Phase 0)
 # ══════════════════════════════════════════════════
 
-SCRIPT_DESIGN_SYSTEM = """你是一個專業影片腳本設計師。你的工作是協助用戶完成腳本設計的五個步驟：
+SCRIPT_DESIGN_SYSTEM = """你是一個專業 AI 影片腳本設計師，專精 Save the Cat 節奏理論與 AI 影像模型（Agnes Image/Video）的提示詞設計。
+
+【工作流程】五步驟協助用戶完成腳本設計：
 Step 1: 需求萃取 — 了解主題、風格、長度、平台、情緒
-Step 2: 節奏表 (Beat Sheet) — 設計時間軸分配和情緒曲線
-Step 3: 腳本撰寫 — 將節奏表轉化為場景描述
+Step 2: 節奏表 (Beat Sheet) — 遵循 Save the Cat，設計時間軸分配和情緒曲線
+Step 3: 腳本撰寫 — 將節奏表轉化為場景描述（每場景一句視覺核心）
 Step 4: 分鏡設計 — 將腳本轉為逐鏡頭分鏡（含 image_prompt + video_prompt）
 Step 5: 腳本審查 — 連續性、可行性、模型匹配檢查
 
-腳本設計準則：
+【腳本設計準則】
 - 視覺化寫作：用畫面思考，非文字思考
 - 精簡：每場景一句話描述核心
 - 連續性：前後場景視覺元素一致
 - 節奏感：長短場景交錯
 - 可視性：確認每個描述都能被 AI 影片模型理解
+- 角色鎖定：character_card 跨場景逐字相同
+
+【禁止行為】
+- 禁止編造來源或無依據的論述
+- 禁止使用通用形容詞（beautiful/nice/amazing）替代具體視覺描述
+- 不可超出使用者指定的場景數和總時長
+
+【交付前自檢】完成五步驟後確認：
+□ character_card 跨場景完全一致
+□ visual_style 跨場景完全相同
+□ 每場景含 image_prompt + video_prompt + negative_prompt
+□ 總場景數與時長符合用戶需求
 """
 
 
@@ -554,6 +571,13 @@ async def coherence_pass(api: AgnesAPI, scenes: list[dict]) -> list[dict]:
 
     system = """你是一個分鏡一致性審查員。
 你的任務：比對所有場景的 character_card，找出差異，統一為最完整的那一版。
+
+【仲裁規則】當場景間的 character_card 衝突時：
+1. 選擇包含最多具體細節（服裝/髮型/特徵）的版本為基準
+2. 基準版本中若有明顯矛盾（如同時寫「短髮」和「長馬尾」），取出現次數多的版本
+3. 無法判定 → 選擇第一個場景的版本
+
+【禁止行為】不可為統一而刪除基準版本中的有效細節。
 輸出 JSON 陣列，每個元素只含 {scene_id, character_card}。
 character_card 必須完全相同（同一角色跨場景鎖定）。
 輸出純 JSON，不要 markdown 包裝。"""
@@ -581,20 +605,22 @@ def build_image_prompt(scene: dict) -> str:
     base = scene.get("image_prompt", "")
     character = scene.get("character_card", "")
     style = scene.get("visual_style", "")
-    seed_tokens = "cinematic, photorealistic, consistent lighting, sharp focus, 9:16 portrait"
+    seed_tokens = []
     if character:
-        seed_tokens = f"character: {character[:120]}, {seed_tokens}"
+        seed_tokens.append(f"character: {character.strip()}")
     if style:
-        seed_tokens = f"{style}, {seed_tokens}"
-    return f"{base}, {seed_tokens}"
+        seed_tokens.append(style.strip())
+    # Quality suffix — neutral (no hardcoded style like "photorealistic")
+    seed_tokens.append("consistent lighting, sharp focus, 9:16 portrait")
+    return f"{base}, {', '.join(seed_tokens)}"
 
 
 def build_video_prompt(scene: dict) -> str:
-    """強化 video_prompt：附加動態一致性指令。"""
-    base = scene.get("video_prompt", "Slow cinematic motion")
+    """強化 video_prompt：附加動態一致性指令（中性，不強制風格）。"""
+    base = scene.get("video_prompt", "Smooth cinematic motion")
     quality_suffix = (
-        " Smooth continuous motion, consistent character appearance throughout, "
-        "stable camera, no sudden cuts, no morphing, photorealistic."
+        " Continuous smooth motion, consistent character appearance throughout, "
+        "stable camera, no sudden cuts, no morphing."
     )
     return base + quality_suffix
 
@@ -612,10 +638,19 @@ async def design_script(
     print(f"     平台: {platform}")
 
     print("  📊 Step 2/5: 節奏表設計")
-    beat_system = """你是一個節奏表 (Beat Sheet) 設計專家。
+    beat_system = """你是一個節奏表 (Beat Sheet) 設計專家，遵循 Save the Cat 節奏理論。
 根據總時長和平台，設計時間軸分配和情緒曲線。
 
-輸出 JSON:
+【設計準則】
+- Hook (0-3s): 開場吸引，用特寫或強烈視覺
+- Setup: 建立情境，中景展示
+- Build-up: 逐步升溫，節奏加快
+- Climax: 情緒頂點，動態鏡頭
+- Resolution: 收束滿足感，鏡頭拉遠
+
+【禁止行為】不可編造與主題無關的節拍名稱，不可超過總時長，不可跳號。
+
+輸出純 JSON（不要 markdown）:
 {
   "total_duration": 30,
   "platform": "shorts",
@@ -631,8 +666,7 @@ async def design_script(
       "camera": "特寫"
     }
   ]
-}
-"""
+}"""
     beat_prompt = f"""請為以下主題設計節奏表：
 主題: {topic}
 場景數: {scene_count}
@@ -719,34 +753,71 @@ async def write_script_v3(
         if beat_sheet else "引入→上升→高潮→收束"
     )
 
-    system = f"""你是一個專業影片分鏡腳本寫手。輸出 JSON 陣列，每個元素包含：
+    total_duration = beat_sheet.get("total_duration", 30) if beat_sheet else 30
+
+    system = f"""你是一個 AI 影片製作系統的專業分鏡腳本寫手，專精 Agnes Image 2.1 Flash（圖片）和 Agnes Video v2.0（影片）兩個模型的提示詞設計。
+
+【核心能力】你能從主題和節奏表中萃取關鍵視覺元素，設計連貫的多場景分鏡，並產出可直接餵入 AI 模型的高品質英文提示詞。
+
+【輸出格式】輸出純 JSON 陣列（不要 markdown 包裝），每個元素包含：
 - scene_id: 整數編號 (0-based)
 - scene_title: 場景標題
 - scene_goal: 這個場景要傳達什麼
-- visual_style: 視覺風格描述（所有場景必須相同）
+- visual_style: 視覺風格描述（所有場景必須完全相同）
+  以逗號分隔關鍵詞格式撰寫（Agnes 擴散模型最佳理解格式），包含四要素：
+  ① 藝術類型 (Cinematic/Anime/Cyberpunk/3D render...) ② 光線設定 (Soft ambient/Neon glow/Golden hour...)
+  ③ 色調與調色 (Teal and orange/Warm earthy/Monochrome...) ④ 鏡頭質感 (Film grain/Deep depth of field/Wide angle...)
+  ⚠️ 不在 visual_style 中描述角色（那是 character_card 的工作），只描述環境的視覺質感
+  範例："Cinematic realism, teal and orange color grading, soft natural sunlight, 8k resolution, highly detailed textures, film grain"
+  ❌ 錯誤："Beautiful video" / "Cinematic, a man running" → 太簡略或混入角色描述
 - character_card: 角色描述卡（性別/年齡/服裝款式與顏色/髮型/主要特徵）
   ⚠️ 所有場景的 character_card 必須逐字相同，這是跨場景一致性的鎖定依據
+  角色描述卡品質自檢：□性別 □年齡區間 □服裝款式+顏色 □髮型+顏色 □體型特徵 □至少一個獨特標記
 - image_prompt: 英文圖片提示詞（給 Agnes Image 2.1 Flash，9:16 直式）
   只描述靜態畫面：主體/場景/光線/風格/材質。不要包含動態描述。
+  高品質標準：主體佔畫面主要位置、光源方向明確、色彩方案一致、避免通用詞如 "beautiful/nice"
+  範例："A woman in black leather jacket standing under neon street lamp, rain-slicked pavement, cinematic blue lighting"
 - image_negative_prompt: 英文負面提示詞（過濾低品質/解剖錯誤）
+  必須包含：worst quality, low quality, blurry, bad anatomy, deformed
 - video_prompt: 英文影片動態描述（給 Agnes Video v2.0）
   只描述動態：主體動作/環境動態/鏡頭運動。不要重複圖片已有的視覺元素。
-- video_negative_prompt: 英文負面提示詞（過濾閃爍/形變/不連貫）
+  高品質標準：指定動作方向和速度、鏡頭運動方式（pan/tilt/track/dolly/static）、環境互動
+  範例："Slow dolly forward as she lifts her gaze toward the light, rain droplets falling, subtle steam rising from wet pavement"
+- video_negative_prompt: 英文負面提示詞（過濾角色變形/閃爍/不連貫）
+  必須包含：different character, face morphing, appearance drift, flickering, jump cut
 - transition_rule: 轉場方式 (dissolve/cut/wipe/morph)
 - duration_seconds: 5-15 秒
+- frame_count: 8n+1 格式幀數（Agnes Video 2.0 規則，如 25/33/41）
 - beat_order: 對應的節奏表編號 (1-based)
 - emotion: 預期情緒
 - camera_angle: 鏡頭角度 (低角度/平視/俯視/跟拍)
 - width: 768
 - height: 1152
 
-關鍵原則：
-1. 所有場景的 character_card 必須完全相同（逐字一致）
-2. 所有場景的 visual_style 必須完全相同（同世界觀）
-3. image_prompt 描述靜態畫面，不包含動態
-4. video_prompt 只描述動態，不重複靜態元素
+【關鍵原則】
+1. 所有場景的 character_card 必須完全相同（逐字一致，不可有任何差異）
+   從 character_card 中自動提取 5-8 個「鎖定關鍵詞」，這些詞必須逐字出現在每個 image_prompt
+2. 所有場景的 visual_style 必須完全相同（同一世界觀）
+   從 visual_style 中自動提取 3-5 個「鎖定關鍵詞」，這些詞必須逐字出現在每個 image_prompt
+3. image_prompt 只描述靜態，不包含任何動態描述
+4. video_prompt 只描述動態，不重複 image_prompt 已有的靜態元素
 5. 情緒曲線遵循: {emotion_curve}
 6. 場景之間光線/方向感/色調要連續
+7. 禁止虛構 character_card 細節 — 不確定就保持精簡
+8. 每個 image_prompt 和 video_prompt 必須包含對應的 negative_prompt
+9. 總時長不超過 {total_duration} 秒，每幕 duration_seconds × {scene_count} ≈ 總時長
+10. frame_count 須符合 8n+1（8 fps 基準：duration_seconds × 8 → 取最接近的 8n+1）
+
+【交付前自檢】輸出前確認：
+□ character_card 所有場景完全一致 ✓
+□ character_card 鎖定關鍵詞逐字出現在每個 image_prompt ✓
+□ visual_style 所有場景完全一致 ✓
+□ visual_style 鎖定關鍵詞逐字出現在每個 image_prompt ✓
+□ image_prompt 不含動態詞 ✓
+□ video_prompt 不含靜態重複 ✓
+□ 每個場景都有 negative_prompt ✓
+□ frame_count 符合 8n+1 ✓
+□ 總時長不超過 {total_duration}s ✓
 
 輸出純 JSON 陣列，不要 markdown 包裝。"""
 
@@ -755,14 +826,17 @@ async def write_script_v3(
 {beat_context}
 
 要求：
-1. 所有場景的 character_card 必須完全相同（這決定了角色連貫性）
-2. 所有場景的 visual_style 必須相同（同一視覺世界）
-3. image_prompt 不要包含動態描述
-4. video_prompt 只描述動態（主體動作 + 環境動態 + 鏡頭運動）
-5. 每個場景都要附 image_negative_prompt 和 video_negative_prompt
-6. 9:16 直式，適合短影片平台
-7. duration_seconds 在 5-15 秒之間
-8. 情緒曲線跟隨節奏表
+1. 所有場景的 character_card 必須完全相同（這決定了角色連貫性）— 逐字比對，不可有任何差異
+2. 從 character_card 提取 5-8 個「鎖定關鍵詞」，每個 image_prompt 必須逐字包含這些詞（不可同義改寫）
+3. 從 visual_style 提取 3-5 個「鎖定關鍵詞」，每個 image_prompt 必須逐字包含這些詞
+4. image_prompt 不要包含動態描述 — 純靜態畫面
+5. video_prompt 只描述動態（主體動作 + 環境動態 + 鏡頭運動）— 用 dolly/pan/track/static 指定鏡頭
+6. 每個場景都要附 image_negative_prompt 和 video_negative_prompt
+7. 9:16 直式，適合短影片平台
+8. duration_seconds 在 5-15 秒之間，總時長不超過 {total_duration} 秒
+9. frame_count 須符合 8n+1（duration_seconds × 8 ≈ 取最接近 8n+1，如 3s→25, 5s→41, 10s→81）
+10. 情緒曲線跟隨節奏表
+11. 禁止使用通用形容詞（beautiful/nice/amazing）— 用具體視覺描述替代
 
 輸出純 JSON 陣列。"""
 
@@ -798,6 +872,227 @@ async def write_script_v3(
         }
         for i in range(scene_count)
     ]
+
+
+# ══════════════════════════════════════════════════
+# v4 Assistant Director — 模組化單次輸出
+# ══════════════════════════════════════════════════
+
+ASSISTANT_DIRECTOR_SYSTEM = """【角色】
+你是 CineAgent，AI 影片副導。將主題轉化為高品質影片腳本。
+
+【框架】
+1. 宏觀（三幕劇）：鋪陳→對抗→解決，於 script_logic 明示三幕邊界。
+2. 情緒（Save the Cat 節奏表）：於 emotion_curve 按節奏表時間點標註轉折，每點含：時間（秒）、情緒狀態、觸發事件。
+3. 分鏡（Hook-Value-CTA）：
+   - Hook：首幕前 3 秒高視覺衝擊
+   - Value：中段傳遞核心資訊與節奏表情緒價值
+   - CTA：末幕導向指定動作（關注/訂閱/點擊）
+
+【一致性】
+- 每幕 visual_prompt 逐字引用 CHARACTER_CARD 與 VISUAL_STYLE 的鎖定關鍵詞，禁止同義改寫或省略。
+- 每幕附 negative_prompt：3–5 個具體詞，對應該幕最可能的失敗模式（變形/多餘肢體/風格突變/文字亂碼），禁止超過 5 詞。
+
+【輸入缺失處理】
+缺 CHARACTER_CARD 或 VISUAL_STYLE → 依主題生成建議版並標註「待確認」；缺平台 → 預設 X。
+
+{platform_appendix}
+
+【輸出】
+僅輸出單一 JSON（不要 markdown 包裝）:
+{{
+  "script_logic": "三幕結構推理說明",
+  "emotion_curve": [{{"time_sec": 0, "emotion": "好奇", "trigger": "閃光開場"}}],
+  "character_card_raw": "原始角色描述",
+  "character_card_keywords": ["keyword1", "keyword2", ...],
+  "visual_style_raw": "原始風格描述",
+  "visual_style_keywords": ["keyword1", "keyword2", ...],
+  "storyboards": [{{
+    "scene_id": 0,
+    "act": 1,
+    "role": "hook",
+    "duration_sec": 3,
+    "frame_count": 25,
+    "visual_prompt": "含 character_card 與 visual_style 鎖定關鍵詞（逐字）",
+    "negative_prompt": "3-5 詞，針對該幕失敗模式",
+    "caption": "平台發布文案"
+  }}]
+}}
+
+【技術約束】
+- 每幕 frame_count 符合 8n+1（Agnes Video 2.0）。
+- 全幕 duration_sec 加總不超過平台上限。
+- emotion_curve 每個時間點對應至少一個 storyboard。"""
+
+PLATFORM_APPENDIX_X = """X：caption ≤25,000 字元；影片總長 ≤140 秒；比例 16:9 或 9:16（依主題屬性擇一並註明理由）。"""
+
+PLATFORM_APPENDIX_TELEGRAM = """Telegram：影片檔案 ≤50MB；於 script_logic 換算分鏡總數×單幕秒數確認不超限；比例不限，預設 16:9。"""
+
+PLATFORM_APPENDIX_DEFAULT = """平台：shorts/reels；影片總長 ≤60 秒；9:16 直式。"""
+
+
+async def write_script_v4_assistant_director(
+    api: AgnesAPI,
+    topic: str,
+    character_card: str | None = None,
+    visual_style: str | None = None,
+    platform: str = "X",
+    scene_count: int = 3,
+    total_duration: int = 30,
+) -> dict:
+    """v4 副導模式：雙溫層次呼叫，產出模組化 JSON。
+
+    Pass 1 (temp=0.3): script_logic + emotion_curve
+    Pass 2 (temp=0.7): storyboards with locked keywords
+
+    回傳 dict: {script_logic, emotion_curve, character_card_raw,
+                character_card_keywords, visual_style_raw,
+                visual_style_keywords, storyboards}
+    """
+    # ── 平台附錄 ──
+    plat_lower = platform.lower()
+    if plat_lower in ("x", "twitter"):
+        appendix = PLATFORM_APPENDIX_X
+    elif plat_lower == "telegram":
+        appendix = PLATFORM_APPENDIX_TELEGRAM
+    else:
+        appendix = PLATFORM_APPENDIX_DEFAULT
+
+    system_full = ASSISTANT_DIRECTOR_SYSTEM.format(platform_appendix=appendix)
+
+    # ── 建構輸入區塊 ──
+    input_blocks = [f"TOPIC: {topic}"]
+    if character_card:
+        input_blocks.append(f"CHARACTER_CARD: {character_card}")
+    else:
+        input_blocks.append("CHARACTER_CARD: 待確認（請從主題推測）")
+    if visual_style:
+        input_blocks.append(f"VISUAL_STYLE: {visual_style}")
+    else:
+        input_blocks.append("VISUAL_STYLE: 待確認（請從主題推測）")
+    input_blocks.append(f"PLATFORM: {platform}")
+    input_blocks.append(f"SCENE_COUNT: {scene_count}")
+    input_blocks.append(f"TOTAL_DURATION: {total_duration}s")
+
+    user_input = "\n".join(input_blocks)
+
+    # ── Pass 1: 結構推理 (temp=0.3) ──
+    struct_prompt = f"""{user_input}
+
+請先輸出 script_logic 和 emotion_curve（不要 storyboards）。
+輸出純 JSON：{{"script_logic": "...", "emotion_curve": [...]}}"""
+
+    print("  🧠 Pass 1/2: 結構推理 (temp=0.3)")
+    try:
+        text = await api.chat(struct_prompt, system=system_full, temperature=0.3)
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
+        structure = json.loads(text)
+        script_logic = structure.get("script_logic", "")
+        emotion_curve = structure.get("emotion_curve", [])
+        print(f"     script_logic: {len(script_logic)} chars, emotion_curve: {len(emotion_curve)} points")
+    except Exception as e:
+        print(f"  ⚠️ Pass 1 失敗: {e}，使用 fallback")
+        script_logic = f"三幕劇結構自動生成：鋪陳→對抗→解決，共 {scene_count} 幕"
+        emotion_curve = [
+            {"time_sec": 0, "emotion": "好奇", "trigger": "開場"},
+            {"time_sec": total_duration // 3, "emotion": "緊張", "trigger": "衝突升級"},
+            {"time_sec": total_duration * 2 // 3, "emotion": "驚嘆", "trigger": "高潮揭露"},
+            {"time_sec": total_duration - 3, "emotion": "滿足", "trigger": "收束"},
+        ]
+
+    # ── Pass 2: 分鏡生成 (temp=0.7) ──
+    storyboard_prompt = f"""{user_input}
+
+已確定的結構：
+- script_logic: {script_logic}
+- emotion_curve: {json.dumps(emotion_curve, ensure_ascii=False)}
+
+請根據以上結構，產出 {scene_count} 個 storyboard。
+重點：每幕 visual_prompt 必須逐字包含 CHARACTER_CARD 和 VISUAL_STYLE 的鎖定關鍵詞。
+
+輸出純 JSON 陣列：[
+  {{
+    "scene_id": 0, "act": 1, "role": "hook",
+    "duration_sec": 3, "frame_count": 25,
+    "visual_prompt": "...", "negative_prompt": "...",
+    "caption": "..."
+  }},
+  ...
+]"""
+
+    print("  🎬 Pass 2/2: 分鏡生成 (temp=0.7)")
+    try:
+        text = await api.chat(storyboard_prompt, system=system_full, temperature=0.7)
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
+        storyboards = json.loads(text)
+        if not isinstance(storyboards, list):
+            storyboards = [storyboards]
+        print(f"     storyboards: {len(storyboards)} scenes")
+    except Exception as e:
+        print(f"  ⚠️ Pass 2 失敗: {e}，使用 fallback")
+        storyboards = _v4_fallback_storyboards(
+            topic, character_card, visual_style, scene_count, total_duration
+        )
+
+    # ── 萃取關鍵詞（fallback: 從原始輸入自動拆詞） ──
+    char_keywords = _extract_keywords(character_card, count=6) if character_card else []
+    style_keywords = _extract_keywords(visual_style, count=4) if visual_style else []
+
+    return {
+        "script_logic": script_logic,
+        "emotion_curve": emotion_curve,
+        "character_card_raw": character_card or "待確認",
+        "character_card_keywords": char_keywords,
+        "visual_style_raw": visual_style or "待確認",
+        "visual_style_keywords": style_keywords,
+        "storyboards": storyboards,
+    }
+
+
+def _extract_keywords(text: str, count: int = 5) -> list[str]:
+    """從角色卡/風格描述中自動提取鎖定關鍵詞（逗號分割或空格分割）。"""
+    if not text:
+        return []
+    # 按逗號或中文逗號分割
+    parts = [p.strip() for p in re.split(r"[,，、]", text) if p.strip()]
+    if len(parts) <= 2:
+        # 可能用空格或換行分隔
+        parts = [p.strip() for p in re.split(r"[\s\n]+", text) if len(p.strip()) > 1]
+    return parts[:count]
+
+
+def _v4_fallback_storyboards(
+    topic: str,
+    character_card: str | None = None,
+    visual_style: str | None = None,
+    scene_count: int = 3,
+    total_duration: int = 30,
+) -> list[dict]:
+    """v4 副導 fallback：當 LLM 呼叫失敗時產出基本分鏡。"""
+    dur_per_scene = max(3, total_duration // scene_count)
+    char = character_card or "young adult, casual modern clothing, neutral expression"
+    style = visual_style or "cinematic, natural lighting, warm colors"
+    roles = ["hook", "value", "cta"]
+    storyboards = []
+    for i in range(scene_count):
+        frame_count = _nearest_8n1(dur_per_scene * 8)  # ~8fps rough estimate
+        storyboards.append({
+            "scene_id": i,
+            "act": 1 if i == 0 else (3 if i == scene_count - 1 else 2),
+            "role": roles[min(i, len(roles) - 1)],
+            "duration_sec": dur_per_scene,
+            "frame_count": frame_count,
+            "visual_prompt": f"{char}, {style}, scene {i + 1}, 9:16 portrait",
+            "negative_prompt": "worst quality, blurry, distorted face, extra limbs",
+            "caption": f"{topic} — Scene {i + 1}",
+        })
+    return storyboards
+
+
+def _nearest_8n1(frames: int) -> int:
+    """回傳最接近 target 的 8n+1 幀數。"""
+    n = max(1, round((frames - 1) / 8))
+    return 8 * n + 1
 
 
 # ══════════════════════════════════════════════════
