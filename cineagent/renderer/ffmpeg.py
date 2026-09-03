@@ -25,6 +25,7 @@ class FFmpegRenderer(RendererProvider):
         if not comp.segments:
             raise ValueError("empty render composition (no segments)")
         ffmpeg = _which("ffmpeg")
+        Path(comp.output_path).parent.mkdir(parents=True, exist_ok=True)
 
         # 1) Normalize each segment into an h264 mp4 of its exact duration.
         normalized: list[str] = []
