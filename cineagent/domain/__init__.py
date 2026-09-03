@@ -19,7 +19,15 @@ from .enums import (
 )
 from .job import GenerationJob, QAReport
 from .project import VideoProject
-from .script import CreativeBrief, Fact, Scene, ScriptPackage
+from .script import (
+    CreativeBrief,
+    CritiqueResult,
+    Fact,
+    HookCandidate,
+    HookSet,
+    Scene,
+    ScriptPackage,
+)
 from .shot import ShotSpec
 from .usage import UsageEvent
 from .visual import VisualBible, VisualCharacter
@@ -31,9 +39,12 @@ __all__ = [
     "CameraAngle",
     "CameraMotion",
     "CreativeBrief",
+    "CritiqueResult",
     "Fact",
     "GenerationJob",
     "GenerationStrategy",
+    "HookCandidate",
+    "HookSet",
     "JobState",
     "Language",
     "OperationKind",

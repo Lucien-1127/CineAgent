@@ -68,3 +68,32 @@ class ScriptPackage(BaseModel):
         default=None, description="Estimated seconds (refined by Audio phase)"
     )
     platform: Platform = Platform.SHORTS
+
+
+class HookCandidate(BaseModel):
+    """A single hook candidate + its score."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+    hook_type: str = ""  # question / shocking / story / stat / cta
+    score: float = Field(default=0.0, ge=0.0, le=1.0)
+    rationale: str = ""
+
+
+class HookSet(BaseModel):
+    """Generated hook candidates for scoring/picking."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    candidates: List[HookCandidate] = Field(default_factory=list)
+
+
+class CritiqueResult(BaseModel):
+    """Output of the ScriptCritic."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    passed: bool = False
+    notes: List[str] = Field(default_factory=list)
+    revision_guidance: str = ""
