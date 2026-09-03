@@ -1,6 +1,6 @@
 # CineAgent v4 — 遷移計畫 (Migration Plan)
 
-- 狀態：`planned`
+- 狀態：`in_progress`（Phase 0–11 已完成，Phase 8 Remotion、真實 vendor、真實發布為 `planned`）
 - 依賴：`docs/audit-v4.md`（Phase 0）、`docs/architecture-v4.md`（目標架構）
 
 ## 0. 遷移策略：Strangler Migration
