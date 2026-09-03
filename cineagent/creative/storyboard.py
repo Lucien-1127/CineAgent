@@ -58,6 +58,7 @@ class StoryboardDirector:
                     generation_strategy=GenerationStrategy.GENERATED_IMAGE,
                     quality_tier=QualityTier.BALANCED,
                     reference_images=list(bible.reference_assets) if bible else [],
+                    provider_constraints=list(bible.negative_constraints) if bible else [],
                 ))
                 idx += 1
         return shots
