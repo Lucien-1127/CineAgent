@@ -18,11 +18,20 @@ class Asset(BaseModel):
     source: AssetSource = AssetSource.LIBRARY
     type: AssetType = AssetType.VIDEO
     uri: str = ""  # path or URL
-    # Semantic embedding (plug-in). Offline fallback is a coarse hash-vector.
-    embedding: List[float] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
     license_note: str = ""
     provenance: str = ""  # generation provenance if relevant
     hash: str = ""  # content hash for dedup
     reuse_count: int = Field(default=0, ge=0)
+    # Semantic embedding is stored in meta["embedding"] (JSON) so it round-trips
+    # through the asset table without a dedicated column.
     meta: Dict[str, Any] = Field(default_factory=dict)
+
+    def semantic_text(self) -> str:
+        """Searchable text for embedding: uri stem + tags."""
+        import os
+
+        stem = ""
+        if self.uri:
+            stem = os.path.basename(self.uri.rstrip("/")).split(".")[0]
+        return " ".join([stem] + list(self.tags))

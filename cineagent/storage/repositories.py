@@ -173,9 +173,16 @@ class AssetRepo:
         )
         self.db.commit()
 
+    def assets_for(self, project_id: str) -> List[Asset]:
+        rows = self.db.execute(
+            "SELECT * FROM assets WHERE project_id=?", (project_id,)
+        ).fetchall()
+        return [self._from_row(r) for r in rows]
+
     def _from_row(self, r: Any) -> Asset:
         return Asset(
-            asset_id=r["asset_id"], source=r["source"], type=r["type"],
+            asset_id=r["asset_id"], project_id=r["project_id"] or "",
+            source=r["source"], type=r["type"],
             uri=r["uri"] or "", tags=json.loads(r["tags"] or "[]"),
             license_note=r["license_note"] or "", provenance=r["provenance"] or "",
             hash=r["hash"] or "", reuse_count=r["reuse_count"] or 0,
