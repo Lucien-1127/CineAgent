@@ -29,6 +29,7 @@ from .script import (
     ScriptPackage,
 )
 from .shot import ShotSpec
+from .timeline import CaptionCue, MasterTimeline, TimelineKind, TimelineSegment, Word
 from .usage import UsageEvent
 from .visual import VisualBible, VisualCharacter
 
@@ -38,6 +39,7 @@ __all__ = [
     "AssetType",
     "CameraAngle",
     "CameraMotion",
+    "CaptionCue",
     "CreativeBrief",
     "CritiqueResult",
     "Fact",
@@ -47,6 +49,7 @@ __all__ = [
     "HookSet",
     "JobState",
     "Language",
+    "MasterTimeline",
     "OperationKind",
     "Platform",
     "ProjectStatus",
@@ -59,8 +62,11 @@ __all__ = [
     "ShotSize",
     "ShotSpec",
     "ShotState",
+    "TimelineKind",
+    "TimelineSegment",
     "UsageEvent",
     "VideoProject",
     "VisualBible",
     "VisualCharacter",
+    "Word",
 ]
