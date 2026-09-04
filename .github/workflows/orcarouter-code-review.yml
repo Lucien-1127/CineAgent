@@ -30,6 +30,7 @@ jobs:
           startsWith(github.event.comment.body, '@orcacode review ')) &&
         contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
     steps:
-      - uses: Continuum-AI-Corp/orca-code-review@v1
+      - uses: Continuum-AI-Corp/orca-code-review@5ecfbf339ccbe5e6a6107259e0369d424846deb4
         with:
           orcarouter-api-key: ${{ secrets.ORCAROUTER_API_KEY }}
+          auto-review-authors: "OWNER,MEMBER,COLLABORATOR,CONTRIBUTOR"
