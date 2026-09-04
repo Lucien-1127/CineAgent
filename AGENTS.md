@@ -1,89 +1,63 @@
-# 🤖 AI Media Pipeline — AGENTS.md
+# AGENTS.md — CineAgent v4
 
-## Mission Control
+Provider-neutral、shot-based、reference-first、audio-timeline-driven 的 AI 影片製作系統（v4）。狀態標示用 `implemented` / `experimental` / `planned` / `deprecated`。**文件不得超前實作**。
 
-本專案為「AI 多模態影音自動化生產流水線」。請遵循以下規範：
+## 核心規則
 
-### 1. 狀態讀取
-執行任何操作前，優先讀取 `agents_workflow_state.json` 確認先前的執行狀態。
+1. **Agnes 已停用**：AgnesAPI 與 run_pipeline.py（v3）非 v4；僅作 migration 歷史保留。
+2. **Provider 抽象化**：Pipeline 只碰 providers/base.py 與各 modality 介面；vendor payload 只在 adapter 內。
+3. **Scene 與 Shot 分離**：Shot = 可獨立恢復的最小生成單位；Audio Master Timeline 定時長。
+4. **Reference-first**：VisualBible 集中角色/場景/服裝/燈光/鏡頭語言；優先 reference image/video。
 
-### 2. 斷點續傳
-若 `current_stage` 為 `SCRIPT_DONE` 或 `VISUAL_DONE` 或 `VIDEO_DONE`，嚴禁從頭執行。
-直接調用 `python run_pipeline.py`，腳本會自動從中斷處恢復。
+5. **Reuse before Generate**：Asset Library → Stock → Image+Motion → 避免不查庫就生昂貴影片。
+6. **Durable / Idempotent**：GenerationJob 必存 remote_job_id；crash 後不誤標 COMPLETE；重送不重複計費建 job。
+7. **文件不得超前實作**：只用四種狀態詞；通過測試後才標 implemented。
+8. **錯誤分流**：用 providers/base.py 的 error taxonomy；不得以單一 except Exception 吞掉所有錯誤。
 
-### 3. API 風控
-若遇到 429 且重試失敗，記錄 `[API_PAUSE]` 並掛起，等待人工介入。
+##已實作
 
-### 4. 腳本設計為必經環節
-所有影片專案須先完成設計腳本（5 步驟：需求萃取→節奏表→腳本撰寫→分鏡→審查）。
+- Canonical Domain Model（cineagent/domain/）.
+- SQLite + WAL 持久層 + Cost Ledger（cineagent/storage/）.
+- Script Engine（Planner→Hook→Writer→Critic→FactCheck→Storyboard，cineagent/creative/）.
+- Audio-First Timeline + MasterTimeline + captions/SRT（orchestration/、media/）.
+- Storyboard + VisualBible + PromptCompiler（vendor gate）.
+- Asset Router（hash dedup/semantic reuse，cineagent/assets/）.
+- Model Capability Router（providers/capability.py，僅 mock 註冊）.
+- Image/Video/Audio/Text Provider 介面 + Mock（durable/idempotent，providers/）.
+- FFmpegRenderer（組出可播放 MP4，《renderer/`）; RemotionRenderer=planned。
+- TechnicalQA（ffprobe）; VisualQAProvider 介面 + Mock（真實模型 planned））.
+- Publishers（YouTube/TikTok/Instagram/X/Telegram，皆 dry-run）.
+- AnalyticsCollector + ContentLearningStore（min_samples gate，analytics/））.
 
----
+- CI（.github/workflows/ci.yml：tests + secret scan）执 E2E smoke（tests/test_e2e_smoke.py））.
 
-## 系統組態
-
-| 參數 | 值 |
-|------|-----|
-| 推理模型 | `agnes-2.0-flash` |
-| 圖片模型 (非 NSFW) | `agnes-image-2.1-flash` |
-| 圖片模型 (NSFW) | 本地 SD Forge (DS8/RV6) |
-| 影片模型 | `agnes-video-v2.0` (異步渲染) |
-| 本地繪圖 | SD WebUI Forge `http://127.0.0.1:7860` |
-| 最大並發生圖 | 3 任務並行 |
-| 影片安全水位線 | 每日 480 秒 |
-
----
-
-## 指令集
+##測試
 
 ```bash
-# 安裝依賴
-pip install -r requirements.txt
-
-# 一鍵啟動
-python run_pipeline.py --topic "你的主題"
-
-# 指定分鏡數
-python run_pipeline.py --scenes 5
-
-# 指定每場景秒數
-python run_pipeline.py --duration 10
-
-# 多圖轉場模式
-python run_pipeline.py --multi-image
-
-# 跳過腳本階段（用已有 scene_prompts.json 繼續）
-python run_pipeline.py --skip-script
-
-# 結構化 JSON 輸出
-python run_pipeline.py --structured
-
-# 重置所有狀態
-python run_pipeline.py --reset
+source .venv/bin/activate
+python -m pytest -q
 ```
 
----
+已驗證基線：56 測試全數通過。#所有 Provider 需有 Mock test。
 
-## 專案結構
 
+
+##目錄
+
+cineagent/   domain creative orchestration providers assets media qa publish analytics storage renderer
+tests/   docs/   .github/workflows/ci.yml
+
+##planned（未完成）
+
+RemotionRenderer（Node 未接線）、真實 vendor adapters（Kling/Runway/Veo/Sora/Luma/OrcaRouter）、
+真實 Publisher 發片 API（目前 dry-run）、真實 Visual QA 模型、真實 TTS（ElevenLabs/OpenAI/local）
++ forced alignment、Provider estimated_cost 真實價格註冊。以上完成並過測後才可改標 implemented。
+
+
+
+##提交規範
+
+- 每個 Phase 一個 commit，訊息 v4 Phase N: ...
+- 不 push 至遠端，除非使用者明確授權
+- 提交前確認無 venv / .env / secret 進 staged
 ```
-ai-media-pipeline/
-├── README.md                    # 專案說明
-├── AGENTS.md                    # 本文件
-├── run_pipeline.py              # 主執行腳本
-├── docs/                        # 文件
-├── references/                  # 參考資料
-├── templates/                   # 模板
-└── output/                      # 產出
-```
-
----
-
-## 📊 當前進度
-
-| 欄位 | 值 |
-|------|-----|
-| **階段** | 待執行 |
-| **分鏡** | 0/0 |
-| **失敗** | 0 |
-| **影片已用秒數** | 0/500 |
-| **更新時間** | - |
