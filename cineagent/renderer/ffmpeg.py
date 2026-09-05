@@ -76,10 +76,16 @@ class FFmpegRenderer(RendererProvider):
         aspect: str, fps: int,
     ) -> None:
         dur = max(0.2, seg.duration)
+        width, height = _target_dimensions(aspect)
+        video_filter = (
+            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1"
+        )
         if seg.kind == "image":
             self._run([
                 ffmpeg, "-y", "-v", "error", "-loop", "1", "-i", seg.path,
-                "-t", f"{dur:.3f}", "-r", str(fps), "-pix_fmt", "yuv420p",
+                "-t", f"{dur:.3f}", "-vf", video_filter, "-r", str(fps),
+                "-pix_fmt", "yuv420p",
                 "-c:v", "libx264", "-crf", "20", "-preset", "veryfast", out,
             ])
         else:
@@ -87,8 +93,8 @@ class FFmpegRenderer(RendererProvider):
             self._run([
                 ffmpeg, "-y", "-v", "error", "-ss", f"{seg.start:.3f}",
                 "-i", seg.path, "-t", f"{dur:.3f}", "-r", str(fps),
-                "-pix_fmt", "yuv420p", "-c:v", "libx264", "-crf", "20",
-                "-preset", "veryfast", out,
+                "-vf", video_filter, "-pix_fmt", "yuv420p", "-c:v", "libx264",
+                "-crf", "20", "-preset", "veryfast", out,
             ])
 
     @staticmethod
@@ -102,7 +108,28 @@ class _RenderError(RuntimeError):
     pass
 
 
-def make_test_media(workdir: str, image="image.png", wav="tone.wav"):
+def _target_dimensions(aspect: str, short_edge: int = 540) -> tuple[int, int]:
+    """Return even target dimensions for an aspect such as ``9:16``."""
+    try:
+        horizontal, vertical = (float(part) for part in aspect.split(":", 1))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid aspect ratio: {aspect!r}") from exc
+    if horizontal <= 0 or vertical <= 0:
+        raise ValueError(f"invalid aspect ratio: {aspect!r}")
+    ratio = horizontal / vertical
+    if ratio >= 1:
+        width, height = round(short_edge * ratio), short_edge
+    else:
+        width, height = short_edge, round(short_edge / ratio)
+    return width + width % 2, height + height % 2
+
+
+def make_test_media(
+    workdir: str,
+    image: str = "image.png",
+    wav: str = "tone.wav",
+    size: str = "540x960",
+):
     """Create a tiny test PNG + tone WAV so render smoke tests have real inputs."""
     from ..media.ffmpeg import _which
     ffmpeg = _which("ffmpeg")
@@ -112,7 +139,7 @@ def make_test_media(workdir: str, image="image.png", wav="tone.wav"):
     w = str(d / wav)
     subprocess.run([
         ffmpeg, "-y", "-v", "error", "-f", "lavfi", "-i",
-        "color=c=navy:s=540x960:d=1", "-frames:v", "1", img,
+        f"color=c=navy:s={size}:d=1", "-frames:v", "1", img,
     ], check=True)
     subprocess.run([
         ffmpeg, "-y", "-v", "error", "-f", "lavfi", "-i",

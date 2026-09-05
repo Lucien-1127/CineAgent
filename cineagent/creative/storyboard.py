@@ -36,7 +36,6 @@ class StoryboardDirector:
         idx = 0
         for scene in script.scenes:
             sentences = self._split_sentences(scene.narration) or [scene.narration]
-            seg = _split_evenly(scene.narration, len(sentences))
             start, end = self._scene_timing(scene_timing, scene.scene_id)
             seg_len = (end - start) / max(1, len(sentences)) if end > start else 0.0
             for i, sentence in enumerate(sentences):
@@ -71,15 +70,3 @@ class StoryboardDirector:
         if timing and scene_id in timing:
             return timing[scene_id]
         return (0.0, 0.0)
-
-
-def _split_evenly(text: str, n: int) -> List[str]:
-    if n <= 1 or not text:
-        return [text]
-    size = max(1, len(text) // n)
-    out = []
-    for i in range(0, len(text), size):
-        out.append(text[i:i + size])
-        if len(out) >= n:
-            break
-    return out

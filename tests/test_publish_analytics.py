@@ -37,7 +37,8 @@ def test_publisher_dry_run_by_default():
         project_id="p1", video_path=path, platform="x", title="標題", caption="說明",
     )))
     assert res.status == "dry_run"
-    assert "not published" in "dry-run: not published"
+    assert res.remote_post_id == ""
+    assert res.error == ""
 
 
 def test_publisher_validates_metadata_and_spec():
@@ -48,6 +49,15 @@ def test_publisher_validates_metadata_and_spec():
     )))
     assert res.status == "failed"
     assert res.error
+
+
+def test_publisher_does_not_hide_programming_errors(monkeypatch):
+    def broken_probe(_path):
+        raise ValueError("unexpected probe bug")
+
+    monkeypatch.setattr("cineagent.media.ffmpeg.probe_video", broken_probe)
+    with pytest.raises(ValueError, match="unexpected probe bug"):
+        XPublisher().validate_video_spec("/tmp/video.mp4")
 
 
 def test_publisher_planned_post_raises_when_enabled():

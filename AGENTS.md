@@ -24,12 +24,12 @@ Provider-neutral、shot-based、reference-first、audio-timeline-driven 的 AI �
 - Asset Router（hash dedup/semantic reuse，cineagent/assets/）.
 - Model Capability Router（providers/capability.py，僅 mock 註冊）.
 - Image/Video/Audio/Text Provider 介面 + Mock（durable/idempotent，providers/）.
-- FFmpegRenderer（組出可播放 MP4，《renderer/`）; RemotionRenderer=planned。
-- TechnicalQA（ffprobe）; VisualQAProvider 介面 + Mock（真實模型 planned））.
+- FFmpegRenderer（組出可播放 MP4，`renderer/`）；RemotionRenderer=planned。
+- TechnicalQA（ffprobe）；VisualQAProvider 介面 + Mock（真實模型 planned）。
 - Publishers（YouTube/TikTok/Instagram/X/Telegram，皆 dry-run）.
-- AnalyticsCollector + ContentLearningStore（min_samples gate，analytics/））.
+- AnalyticsCollector + ContentLearningStore（min_samples gate，analytics/）。
 
-- CI（.github/workflows/ci.yml：tests + secret scan）执 E2E smoke（tests/test_e2e_smoke.py））.
+- CI（.github/workflows/ci.yml：tests + secret scan）與 E2E smoke（tests/test_e2e_smoke.py）。
 
 ##測試
 
@@ -60,4 +60,3 @@ RemotionRenderer（Node 未接線）、真實 vendor adapters（Kling/Runway/Veo
 - 每個 Phase 一個 commit，訊息 v4 Phase N: ...
 - 不 push 至遠端，除非使用者明確授權
 - 提交前確認無 venv / .env / secret 進 staged
-```

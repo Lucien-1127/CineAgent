@@ -55,6 +55,14 @@ def test_library_search_respects_threshold():
     assert lib.best("雨夜 城市 夜景", threshold=0.9) is None
 
 
+def test_library_search_does_not_duplicate_global_assets():
+    repo = _db()
+    lib = AssetLibrary(repo, EMB)
+    lib.add(_asset("a1", "/tmp/cat.mp4", tags=["貓", "可愛"]))
+    hits = lib.search("貓 可愛", threshold=0.0, project_id="")
+    assert [asset.asset_id for asset, _ in hits] == ["a1"]
+
+
 class FakeStock(StockProvider):
     name = "fake-stock"
 

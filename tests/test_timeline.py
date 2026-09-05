@@ -58,6 +58,24 @@ def test_scene_timing_maps_scene_ids():
     assert s1[1] <= s2[0]  # s2 starts after s1 ends
 
 
+def test_scene_timing_maps_repeated_narration_sequentially():
+    pkg = ScriptPackage(
+        hook="獨立鉤子",
+        narration="",
+        scenes=[
+            {"scene_id": "s1", "narration": "重複旁白。", "title": "一", "goal": "一"},
+            {"scene_id": "s2", "narration": "重複旁白。", "title": "二", "goal": "二"},
+        ],
+        script_strategy="short_viral",
+        platform="shorts",
+        metadata={},
+    )
+    tl = _run(build_master_timeline(MockAudioProvider(), pkg))
+    timing = scene_timing_of(tl, pkg.scenes)
+    assert timing["s1"] != timing["s2"]
+    assert timing["s1"][1] <= timing["s2"][0]
+
+
 def test_caption_grouping_and_srt():
     words = [
         Word(text="你", start=0.0, end=0.25),

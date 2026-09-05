@@ -36,7 +36,7 @@ class TechnicalQA:
             severities.append("high")
             penalty += 0.6
         else:
-            if expected_duration and abs(
+            if expected_duration is not None and abs(
                 info["duration"] - expected_duration
             ) > self.duration_tolerance:
                 problems.append(
@@ -62,7 +62,7 @@ class TechnicalQA:
                     severities.append("low")
                     penalty += 0.1
 
-            if expected_fps and info.get("fps"):
+            if expected_fps is not None and info.get("fps") is not None:
                 if abs(info["fps"] - expected_fps) > 2.0:
                     problems.append(
                         f"fps mismatch: got {info['fps']} expected ~{expected_fps}"

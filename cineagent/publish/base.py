@@ -43,10 +43,10 @@ class Publisher(ABC):
 
     def validate_video_spec(self, video_path: str) -> List[str]:
         """Return a list of spec violations (empty = ok)."""
-        from ..media.ffmpeg import probe_video
+        from ..media.ffmpeg import MediaCommandError, MediaToolMissing, probe_video
         try:
             info = probe_video(video_path)
-        except Exception as e:  # noqa: BLE001 - surfaced as a violation list
+        except (MediaCommandError, MediaToolMissing) as e:
             return [f"cannot probe video: {e}"]
         problems: List[str] = []
         if not info.get("duration", 0) > 0:

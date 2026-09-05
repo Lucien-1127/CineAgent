@@ -33,7 +33,10 @@ class AssetLibrary:
         """Return assets whose semantic similarity to `text` >= threshold."""
         q = self.embedder.embed(text)
         hits: List[Tuple[Asset, float]] = []
-        for asset in self.repo.assets_for(project_id) + self.repo.assets_for(""):
+        candidates = self.repo.assets_for(project_id)
+        if project_id:
+            candidates += self.repo.assets_for("")
+        for asset in candidates:
             if not asset.meta.get("embedding"):
                 continue
             sim = self.embedder.similarity(q, asset.meta["embedding"])

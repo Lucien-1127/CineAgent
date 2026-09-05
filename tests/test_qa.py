@@ -51,9 +51,15 @@ def test_technical_qa_flags_duration_mismatch():
     assert any("duration" in p for p in rep.problems)
 
 
+def test_technical_qa_checks_explicit_zero_duration():
+    path = _render("/tmp/cineagent-qa-smoke/qa_zero_expected.mp4")
+    rep = TechnicalQA(duration_tolerance=0.05).assess(path, expected_duration=0.0)
+    assert any("duration mismatch" in p for p in rep.problems)
+
+
 def test_technical_qa_output_file_exists():
     path = _render("/tmp/cineagent-qa-smoke/qa_exists.mp4", with_audio=False)
-    # renderer muxes a silent audio track, so the file should still decode/avaudio
+    # Renderer muxes a silent audio track, so the file should still decode with audio.
     rep = TechnicalQA().assess(path)
     assert rep.passed is True
 

@@ -72,17 +72,25 @@ async def build_master_timeline(
 def scene_timing_of(timeline: MasterTimeline, scenes) -> Dict[str, Tuple[float, float]]:
     """Map scene_id -> (start, end) from narration segments.
 
-    Segments are matched to scenes by narration text, which robustly skips a
-    leading hook segment (hook text != any scene's narration).
+    Segments are consumed in order so repeated narration maps to its matching
+    occurrence. Unmatched narration segments, such as a leading hook, are
+    skipped.
     """
-    by_text: Dict[str, Tuple[float, float]] = {}
-    for seg in timeline.segments:
-        if seg.kind == TimelineKind.NARRATION and seg.text:
-            by_text.setdefault(seg.text, (seg.start, seg.end))
+    narration_segments = [
+        seg for seg in timeline.segments
+        if seg.kind == TimelineKind.NARRATION and seg.text
+    ]
     mapping: Dict[str, Tuple[float, float]] = {}
+    segment_index = 0
     for scene in scenes:
-        if scene.narration and scene.narration in by_text:
-            mapping[scene.scene_id] = by_text[scene.narration]
+        if not scene.narration:
+            continue
+        while segment_index < len(narration_segments):
+            seg = narration_segments[segment_index]
+            segment_index += 1
+            if seg.text == scene.narration:
+                mapping[scene.scene_id] = (seg.start, seg.end)
+                break
     return mapping
 
 
