@@ -14,7 +14,7 @@ Provider-neutral、shot-based、reference-first、audio-timeline-driven 的 AI �
 7. **文件不得超前實作**：只用四種狀態詞；通過測試後才標 implemented。
 8. **錯誤分流**：用 providers/base.py 的 error taxonomy；不得以單一 except Exception 吞掉所有錯誤。
 
-##已實作
+## 已實作
 
 - Canonical Domain Model（cineagent/domain/）.
 - SQLite + WAL 持久層 + Cost Ledger（cineagent/storage/）.
@@ -31,23 +31,23 @@ Provider-neutral、shot-based、reference-first、audio-timeline-driven 的 AI �
 
 - CI（.github/workflows/ci.yml：tests + secret scan）與 E2E smoke（tests/test_e2e_smoke.py）。
 
-##測試
+## 測試
 
 ```bash
 source .venv/bin/activate
 python -m pytest -q
 ```
 
-已驗證基線：56 測試全數通過。#所有 Provider 需有 Mock test。
+已驗證基線：56 測試全數通過。所有 Provider 需有 Mock test。
 
 
 
-##目錄
+## 目錄
 
 cineagent/   domain creative orchestration providers assets media qa publish analytics storage renderer
 tests/   docs/   .github/workflows/ci.yml
 
-##planned（未完成）
+## planned（未完成）
 
 RemotionRenderer（Node 未接線）、真實 vendor adapters（Kling/Runway/Veo/Sora/Luma/OrcaRouter）、
 真實 Publisher 發片 API（目前 dry-run）、真實 Visual QA 模型、真實 TTS（ElevenLabs/OpenAI/local）
@@ -55,7 +55,7 @@ RemotionRenderer（Node 未接線）、真實 vendor adapters（Kling/Runway/Veo
 
 
 
-##提交規範
+## 提交規範
 
 - 每個 Phase 一個 commit，訊息 v4 Phase N: ...
 - 不 push 至遠端，除非使用者明確授權
