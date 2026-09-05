@@ -21,6 +21,14 @@ class CreativeBrief(BaseModel):
     references: List[str] = Field(default_factory=list)
     prohibited_elements: List[str] = Field(default_factory=list)
     cta_strategy: str = ""  # e.g. follow, subscribe, click_link
+    audience_problem: str = ""
+    viewer_promise: str = ""
+    novelty_angle: str = ""
+    proof_points: List[str] = Field(default_factory=list)
+    trend_context: List[str] = Field(default_factory=list)
+    platform_native_style: str = ""
+    originality_plan: str = ""
+    primary_success_metric: str = "average_percentage_viewed"
 
 
 class Fact(BaseModel):
@@ -79,6 +87,11 @@ class HookCandidate(BaseModel):
     hook_type: str = ""  # question / shocking / story / stat / cta
     score: float = Field(default=0.0, ge=0.0, le=1.0)
     rationale: str = ""
+    audience_relevance: float = Field(default=0.5, ge=0.0, le=1.0)
+    promise_clarity: float = Field(default=0.5, ge=0.0, le=1.0)
+    curiosity: float = Field(default=0.5, ge=0.0, le=1.0)
+    payoff_alignment: float = Field(default=0.5, ge=0.0, le=1.0)
+    credibility: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
 class HookSet(BaseModel):
@@ -97,3 +110,9 @@ class CritiqueResult(BaseModel):
     passed: bool = False
     notes: List[str] = Field(default_factory=list)
     revision_guidance: str = ""
+    hook_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    retention_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    payoff_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    originality_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    platform_fit_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    retention_risks: List[str] = Field(default_factory=list)

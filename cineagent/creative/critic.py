@@ -19,12 +19,18 @@ class ScriptCritic:
     ) -> CritiqueResult:
         strategy = pkg.script_strategy
         system = (
-            "你是嚴格的腳本審查員。檢查：Hook 是否強而有力、旁白是否通順、"
-            "場景是否連貫、是否偏離指定結構、CTA（若適用）是否明確。"
+            "你是嚴格的短影音 retention 編輯。分別評估 Hook、前 3 秒承諾、持續留存設計、"
+            "payoff、原創性與平台原生感。檢查是否有空泛前言、重複資訊、與內容無關的"
+            "clickbait、過早 CTA 或缺乏視覺/語意變化。只在核心維度足夠時 passed=true，"
+            "否則提供可直接交給 Writer 的 revision_guidance 與 retention_risks。"
         )
         user = (
-            f"結構：{strategy.value}\nHook：{pkg.hook}\n旁白：{pkg.narration}\n"
-            f"場景數：{len(pkg.scenes)}"
+            f"平台：{pkg.platform.value}\n結構：{strategy.value}\nHook：{pkg.hook}\n"
+            f"旁白：{pkg.narration}\nCTA：{pkg.cta}\n場景："
+            + "\n".join(
+                f"{scene.index}. {scene.title}｜{scene.goal}｜{scene.narration}"
+                for scene in pkg.scenes
+            )
         )
         return await provider.structured(CritiqueResult, system, user, temperature=0.2)
 

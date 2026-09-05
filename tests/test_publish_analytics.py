@@ -109,3 +109,20 @@ def test_analytics_learning_after_min_samples():
     insights = store.insights("short_viral")
     assert len(insights) == 1
     assert insights[0].samples == 3
+
+
+def test_analytics_uses_distribution_and_retention_signals():
+    store = ContentLearningStore(min_samples=3)
+    for i in range(3):
+        store.record(VideoMetrics(
+            video_ref=f"v{i}", views=100, shown_in_feed=200,
+            chose_to_view=80, average_percentage_viewed=70.0,
+            retention_curve=[100.0, 75.0, 55.0], shares=1, replays=8,
+            script_strategy="short_viral",
+        ))
+    insight = store.insights("short_viral")[0]
+    assert insight.chose_to_view_rate == 0.4
+    assert insight.hook_retention_avg == 55.0
+    assert insight.share_rate == 0.01
+    assert insight.replay_rate == 0.08
+    assert "first-frame and hook variants" in insight.note

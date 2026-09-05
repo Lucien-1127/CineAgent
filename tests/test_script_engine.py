@@ -3,13 +3,20 @@ import asyncio
 
 import pytest
 
-from cineagent.creative import PromptCompiler, ScriptEngine, VendorNotImplemented
+from cineagent.creative import (
+    HookGenerator,
+    PromptCompiler,
+    ScriptEngine,
+    ScriptWriter,
+    VendorNotImplemented,
+)
 from cineagent.domain import (
     CreativeBrief,
     HookCandidate,
     HookSet,
     ScriptPackage,
     ShotSpec,
+    Platform,
 )
 from cineagent.domain.script import CritiqueResult
 from cineagent.providers.text.mock import MockTextProvider
@@ -105,6 +112,36 @@ def test_engine_picks_best_hook_and_returns_package():
     assert isinstance(pkg, ScriptPackage)
     assert pkg.hook == "hook-top"
     assert len(engine.last_critiques) == 1
+    assert len(pkg.metadata["hook_candidates"]) == 3
+
+
+def test_hook_rank_uses_audience_and_payoff_dimensions():
+    generator = HookGenerator()
+    self_scored = HookCandidate(
+        text="泛用標題", score=1.0, audience_relevance=0.0,
+        promise_clarity=0.0, curiosity=0.0, payoff_alignment=0.0,
+        credibility=0.0,
+    )
+    audience_aligned = HookCandidate(
+        text="精準承諾", score=0.4, audience_relevance=1.0,
+        promise_clarity=1.0, curiosity=1.0, payoff_alignment=1.0,
+        credibility=1.0,
+    )
+    assert generator._rank(audience_aligned) > generator._rank(self_scored)
+
+
+def test_writer_receives_revision_guidance_and_platform():
+    provider = _make_provider(hooks=_valid_hooks())
+    pkg = _run(ScriptWriter().write(
+        provider,
+        CreativeBrief.model_validate(_valid_brief()),
+        "hook-top",
+        platform=Platform.TIKTOK,
+        revision_guidance="刪除空泛前言，提前交付證據",
+    ))
+    assert pkg.platform == Platform.TIKTOK
+    assert "刪除空泛前言" in provider.last_user
+    assert "平台：tiktok" in provider.last_user
 
 
 def test_malformed_json_raises_not_accepted_as_free_text():

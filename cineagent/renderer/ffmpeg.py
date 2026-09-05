@@ -108,7 +108,7 @@ class _RenderError(RuntimeError):
     pass
 
 
-def _target_dimensions(aspect: str, short_edge: int = 540) -> tuple[int, int]:
+def _target_dimensions(aspect: str, short_edge: int = 720) -> tuple[int, int]:
     """Return even target dimensions for an aspect such as ``9:16``."""
     try:
         horizontal, vertical = (float(part) for part in aspect.split(":", 1))

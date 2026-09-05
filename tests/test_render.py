@@ -70,7 +70,7 @@ def test_ffmpeg_normalizes_mixed_segment_geometry():
     )
     out = _run(FFmpegRenderer().render(comp))
     info = probe_video(out)
-    assert (info["width"], info["height"]) == (540, 960)
+    assert (info["width"], info["height"]) == (720, 1280)
 
 
 def test_remotion_renderer_is_planned_gate():

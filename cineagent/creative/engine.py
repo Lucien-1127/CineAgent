@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from ..domain.enums import ScriptStrategy
+from ..domain.enums import Platform, ScriptStrategy
 from ..domain.script import CreativeBrief, ScriptPackage
 from ..providers.base import ProviderError, TextProvider
 from .critic import ScriptCritic
@@ -35,10 +35,14 @@ class ScriptEngine:
         topic: str,
         strategy: ScriptStrategy = ScriptStrategy.SHORT_VIRAL,
         hints: Optional[str] = None,
+        platform: Platform = Platform.SHORTS,
     ) -> ScriptPackage:
-        brief = await self.planner.plan(provider, topic, hints)
-        best_hook = await self.hooks.generate(provider, brief)
-        pkg = await self.writer.write(provider, brief, best_hook.text, strategy)
+        brief = await self.planner.plan(provider, topic, hints, platform)
+        best_hook = await self.hooks.generate(provider, brief, platform)
+        pkg = await self.writer.write(provider, brief, best_hook.text, strategy, platform)
+        pkg.metadata["hook_candidates"] = [
+            candidate.model_dump() for candidate in self.hooks.last_candidates
+        ]
 
         self.last_critiques = []
         for _round in range(MAX_CRITIC_ROUNDS):
@@ -47,8 +51,12 @@ class ScriptEngine:
             if verdict.passed:
                 break
             pkg = await self.writer.write(
-                provider, brief, pkg.hook, strategy,
+                provider, brief, pkg.hook, strategy, platform,
+                revision_guidance=verdict.revision_guidance,
             )
+            pkg.metadata["hook_candidates"] = [
+                candidate.model_dump() for candidate in self.hooks.last_candidates
+            ]
         else:
             # After max rounds, keep last revision; record failure but don't lose work.
             if not self.last_critiques or not self.last_critiques[-1].passed:
