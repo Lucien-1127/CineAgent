@@ -1,5 +1,8 @@
 # ConeAgent Bot 設計文件
 
+> ⚠️ **v3 遷移歷史**：本文件內的 Agnes 2.0 Flash／Image／Video 模型選型已停用。
+> 現行只支援 Seedance 與 Kling（動畫）＋ Provider-neutral 架構，見 `AGENTS.md`。
+
 ## 1️⃣ 介面設計
 
 ### 歡迎訊息模板

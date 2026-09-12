@@ -1,0 +1,77 @@
+"""Runner: success, resume-skip, retry cap, blocker stop."""
+import asyncio
+
+from cineagent.domain import Budget, PipelineRunState
+from cineagent.orchestration import VideoPipelineRunner, plan_segments
+from cineagent.providers.base import AuthError, RateLimitError
+from conftest import FakeVideoProvider
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+def _state():
+    return PipelineRunState(run_id="r", objective="test",
+                            provider="fake-video", model="fake-model")
+
+
+def _plans(total=10, max_dur=5):
+    return plan_segments(total, max_dur, overlap_seconds=0.0,
+                         provider="fake-video", model="fake-model")
+
+
+def test_run_all_segments_succeed(tmp_path):
+    prov = FakeVideoProvider(str(tmp_path))
+    state = _state()
+    runner = VideoPipelineRunner(prov, str(tmp_path / "out"), poll_interval=0.0)
+    state = _run(runner.run(state, _plans(), stitch=False))
+    assert state.completed == [0, 1]
+    assert state.failed == []
+    assert prov.create_calls == [0, 1]
+
+
+def test_resume_skips_completed(tmp_path):
+    prov = FakeVideoProvider(str(tmp_path))
+    state = _state()
+    s0 = state.ensure_segment(0)
+    s0.status = "succeeded"
+    s0.output_url = "http://x/0.mp4"
+    s0.local_path = str(tmp_path / "0.mp4")
+
+    runner = VideoPipelineRunner(prov, str(tmp_path / "out"), poll_interval=0.0)
+    state = _run(runner.run(state, _plans(), stitch=False))
+    assert prov.create_calls == [1]  # only segment 1 was submitted
+    assert state.completed == [0, 1]
+
+
+def test_retry_cap_exhausted(tmp_path):
+    class RateLimitProvider(FakeVideoProvider):
+        async def create_task(self, request):
+            raise RateLimitError("429")
+
+    prov = RateLimitProvider(str(tmp_path))
+    state = _state()
+    state.budget = Budget(max_retries_per_segment=2)
+    runner = VideoPipelineRunner(prov, str(tmp_path / "out"), poll_interval=0.0)
+    state = _run(runner.run(state, _plans(total=5, max_dur=5), stitch=False))
+
+    seg = state.segment(0)
+    assert seg.status == "failed"
+    assert seg.retry_count == 2  # exhausted the budget
+    assert state.failed == [0]
+
+
+def test_blocker_stops_run(tmp_path):
+    class AuthProvider(FakeVideoProvider):
+        async def create_task(self, request):
+            raise AuthError("401 bad key")
+
+    prov = AuthProvider(str(tmp_path))
+    state = _state()
+    runner = VideoPipelineRunner(prov, str(tmp_path / "out"), poll_interval=0.0)
+    state = _run(runner.run(state, _plans(), stitch=False))
+
+    assert state.blockers
+    assert state.current_stage == "BLOCKED"
+    assert state.completed == []

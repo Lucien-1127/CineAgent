@@ -1,5 +1,8 @@
 # 📄 Script Package JSON 範本
 
+> ⚠️ **v3 遷移歷史**：本範本內的 `Agnes Image 2.1 Flash`／`Agnes Video 2.0` 佔位為舊版供應商，已全面棄用。
+> 現行動畫只支援 Seedance 與 Kling，提示詞欄位改由 `cineagent/providers/video/schemas.py` 承載。本範本不再作為實作依據。
+
 ```json
 {
   "run_id": "a1b2c3d4",
