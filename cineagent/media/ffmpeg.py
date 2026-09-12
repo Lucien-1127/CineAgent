@@ -73,6 +73,10 @@ def extract_last_frame(video: str, out_path: str, pad: float = 0.0) -> str:
     info = probe_video(video)
     dur = info.get("duration", 0.0)
     at = max(0.0, dur - max(0.0, pad))
+    # Never seek to exactly the end: there is no frame at t==duration. Step back
+    # so a real frame is always captured.
+    if dur > 0.05:
+        at = min(at, max(0.0, dur - 0.05))
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         ffmpeg, "-y", "-v", "error", "-ss", f"{at:.3f}", "-i", video,
