@@ -46,11 +46,83 @@ class CapabilityRegistry:
         return list(self._by_key.values())
 
 
-def default_registry() -> CapabilityRegistry:
-    """Registry with only the offline Mock provider (implemented).
+def _seedance_caps() -> List[ModelCapability]:
+    """Verified Seedance entries (official tutorial docs.volcengine.com/82379/2298881).
 
-    Real vendors (Kling/Runway/Veo/Sora/Luma/OrcaRouter) are added only after
-    official-doc review, with real pricing/model fields — never guessed.
+    estimated_cost_usd stays None (pricing UNVERIFIED), so the cost-aware
+    ModelRouter will not auto-select them until a real price is configured;
+    the planner addresses them directly by provider/model.
+    """
+    base = {"text_to_video", "image_to_video", "first_frame", "last_frame"}
+    ref = base | {"reference_image", "reference_video", "reference_audio"}
+
+    def m(model: str, max_dur: float, supports, audio: bool) -> ModelCapability:
+        caps = set(supports)
+        if audio:
+            caps.add("audio_generation")
+        return ModelCapability(
+            provider="seedance", model=model, modalities=("video",),
+            supports=frozenset(caps), max_duration=max_dur,
+            aspect_ratios=("16:9", "9:16", "1:1", "21:9", "adaptive"),
+            resolution="1080p", concurrency=1, expected_latency_s=60.0,
+            estimated_cost_usd=None, reliability=0.5, status="experimental",
+        )
+
+    return [
+        m("doubao-seedance-2-5-260628", 30.0, ref, True),
+        m("doubao-seedance-2-0-260128", 15.0, ref, True),
+        m("doubao-seedance-2-0-fast-260128", 15.0, ref, True),
+        m("doubao-seedance-2-0-mini-260615", 15.0, ref, True),
+        m("doubao-seedance-1-5-pro-251215", 12.0, base, True),
+        m("doubao-seedance-1-0-pro-250528", 12.0, base, False),
+        m("doubao-seedance-1-0-pro-fast-251015", 12.0,
+          {"text_to_video", "image_to_video", "first_frame"}, False),
+    ]
+
+
+def _kling_caps() -> List[ModelCapability]:
+    """Kling legacy API entries. max_duration is conservative (5/10s enum).
+
+    kling-v2-1 / kling-v2-1-master are image-to-video only. Native audio is
+    only cross-confirmed for kling-v2-6 and kling-v3.
+    """
+    i2v = {"image_to_video", "first_frame", "last_frame"}
+    base = i2v | {"text_to_video"}
+
+    def m(model: str, supports, audio: bool) -> ModelCapability:
+        caps = set(supports)
+        if audio:
+            caps.add("audio_generation")
+        return ModelCapability(
+            provider="kling", model=model, modalities=("video",),
+            supports=frozenset(caps), max_duration=10.0,
+            aspect_ratios=("16:9", "9:16", "1:1", "4:3", "3:4", "21:9"),
+            resolution="1080p", concurrency=1, expected_latency_s=60.0,
+            estimated_cost_usd=None, reliability=0.5, status="experimental",
+        )
+
+    return [
+        m("kling-v1", base, False),
+        m("kling-v1-5", base, False),
+        m("kling-v1-6", base, False),
+        m("kling-v2", base, False),
+        m("kling-v2-master", base, False),
+        m("kling-v2-5", base, False),
+        m("kling-v2-5-turbo", base, False),
+        m("kling-v2-6", base, True),
+        m("kling-v3", base, True),
+        m("kling-v2-1", i2v, False),
+        m("kling-v2-1-master", i2v, False),
+    ]
+
+
+def default_registry() -> CapabilityRegistry:
+    """Registry of implemented (mock) + experimental (Seedance/Kling) providers.
+
+    Seedance and Kling are registered with verified capability fields and
+    status "experimental" (adapters implemented, not yet live-verified).
+    Real prices are left None so the cost-aware router never silently picks an
+    unpriced model. Remaining vendors stay "planned".
     """
     reg = CapabilityRegistry()
     reg.register(ModelCapability(
@@ -65,8 +137,12 @@ def default_registry() -> CapabilityRegistry:
         resolution="1080p", concurrency=8, expected_latency_s=0.1,
         estimated_cost_usd=0.0, reliability=1.0, status="implemented",
     ))
+    for cap in _seedance_caps():
+        reg.register(cap)
+    for cap in _kling_caps():
+        reg.register(cap)
     # Declared-but-not-implemented vendors (status: planned, cost unknown).
-    for prov in ("kling", "runway", "veo", "sora", "luma", "orcarouter"):
+    for prov in ("runway", "veo", "sora", "luma", "orcarouter"):
         reg.register(ModelCapability(
             provider=prov, model=f"{prov}-video", status="planned",
         ))
