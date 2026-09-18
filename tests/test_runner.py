@@ -1,5 +1,6 @@
 """Runner: success, resume-skip, retry cap, blocker stop."""
 import asyncio
+from pathlib import Path
 
 from cineagent.domain import Budget, PipelineRunState
 from cineagent.orchestration import VideoPipelineRunner, plan_segments
@@ -17,8 +18,12 @@ def _state():
 
 
 def _plans(total=10, max_dur=5):
-    return plan_segments(total, max_dur, overlap_seconds=0.0,
+    plans = plan_segments(total, max_dur, overlap_seconds=0.0,
                          provider="fake-video", model="fake-model")
+    # Lifecycle unit tests use placeholder videos, not real frame chaining.
+    for plan in plans:
+        plan.start_frame_source = "keyframe"
+    return plans
 
 
 def test_run_all_segments_succeed(tmp_path):
@@ -38,6 +43,7 @@ def test_resume_skips_completed(tmp_path):
     s0.status = "succeeded"
     s0.output_url = "http://x/0.mp4"
     s0.local_path = str(tmp_path / "0.mp4")
+    Path(s0.local_path).write_bytes(b"video-placeholder")
 
     runner = VideoPipelineRunner(prov, str(tmp_path / "out"), poll_interval=0.0)
     state = _run(runner.run(state, _plans(), stitch=False))

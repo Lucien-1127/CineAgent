@@ -20,7 +20,7 @@ from .schemas import (
 
 
 class MockGenerationProvider(GenerationProvider):
-    name = "mock-generation"
+    name = "mock"
 
     def __init__(self, out_dir: str = "/tmp/cineagent-mock-gen",
                  auto_succeed: bool = False) -> None:
@@ -67,6 +67,10 @@ class MockGenerationProvider(GenerationProvider):
         self._urls[remote_job_id] = video_path
 
     async def get_task(self, remote_job_id: str) -> VideoTaskStatus:
+        if len(remote_job_id) == 16 and all(c in "0123456789abcdef" for c in remote_job_id):
+            stored = self.out_dir / f"{remote_job_id}.mp4"
+            if stored.is_file() and stored.stat().st_size:
+                self.complete(remote_job_id, str(stored))
         state = self._state.get(remote_job_id, "failed")
         if state == "succeeded":
             return VideoTaskStatus(

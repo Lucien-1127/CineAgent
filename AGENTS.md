@@ -40,7 +40,7 @@ source .venv/bin/activate
 python -m pytest -q
 ```
 
-已驗證基線：120 測試全數通過。所有 Provider 需有 Mock test。
+原始基線：120 測試；2026-09-18 復原與 OrcaRouter 修正後，本地 172 測試全數通過。所有 Provider 需有 Mock test。
 
 
 
@@ -51,7 +51,7 @@ tests/   docs/   .github/workflows/ci.yml
 
 ## planned（未完成）
 
-RemotionRenderer（Node 未接線）、真實 vendor adapters（Runway/Veo/Sora/Luma/OrcaRouter；Seedance/Kling 已 experimental）、
+RemotionRenderer（Node 未接線）、真實 vendor adapters（Runway/Veo/Sora/Luma；Seedance/Kling/OrcaRouter 已 experimental）、
 真實 Publisher 發片 API（目前 dry-run）、真實 Visual QA 模型、真實 TTS（ElevenLabs/OpenAI/local）
 + forced alignment、Provider estimated_cost 真實價格註冊。以上完成並過測後才可改標 implemented。
 
@@ -62,3 +62,7 @@ RemotionRenderer（Node 未接線）、真實 vendor adapters（Runway/Veo/Sora/
 - 每個 Phase 一個 commit，訊息 v4 Phase N: ...
 - 不 push 至遠端，除非使用者明確授權
 - 提交前確認無 venv / .env / secret 進 staged
+
+## 任務復原更新
+
+OrcaRouter 動畫轉接器、原子檢查點及續跑防重送修正見 `docs/video-recovery.md`。真實付費生成驗收仍未完成；不可將 HTTP 模擬測試當成真實 API 驗收。

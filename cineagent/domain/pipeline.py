@@ -7,6 +7,8 @@ remote job id is first queried (never blindly re-submitted).
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -22,11 +24,13 @@ class SegmentState(BaseModel):
     time_start: float = 0.0
     time_end: float = 0.0
     duration_seconds: float = 0.0
+    generation_duration_seconds: Optional[int] = None
     provider: str = ""
     model: str = ""
     status: str = "pending"  # pending/submitted/generating/succeeded/failed
     retry_count: int = Field(default=0, ge=0)
     remote_job_id: Optional[str] = None
+    idempotency_key: str = ""
     start_frame_source: Optional[str] = None
     end_frame_source: Optional[str] = None
     previous_segment_id: Optional[int] = None
@@ -61,7 +65,9 @@ class SegmentState(BaseModel):
 
     @property
     def is_complete(self) -> bool:
-        return self.status == "succeeded" and bool(self.output_url or self.local_path)
+        return (self.status == "succeeded" and bool(self.local_path)
+                and Path(self.local_path).is_file()
+                and Path(self.local_path).stat().st_size > 0)
 
 
 class Budget(BaseModel):
@@ -89,6 +95,10 @@ class PipelineRunState(BaseModel):
     budget: Budget = Field(default_factory=Budget)
     blockers: List[str] = Field(default_factory=list)
     last_error: Optional[str] = None
+    plans: List[Dict[str, Any]] = Field(default_factory=list)
+    seam_failures: List[str] = Field(default_factory=list)
+    final_path: Optional[str] = None
+    workdir: Optional[str] = None
 
     # ── helpers ───────────────────────────────────────────────────────
     def segment(self, segment_id: int) -> Optional[SegmentState]:
@@ -103,7 +113,23 @@ class PipelineRunState(BaseModel):
     def to_file(self, path: str) -> str:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(self.model_dump_json(indent=2), encoding="utf-8")
+        # Never truncate the last good checkpoint on an interrupted write.
+        fd, tmp = tempfile.mkstemp(prefix=p.name + ".", dir=p.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(self.model_dump_json(indent=2))
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(tmp, p)
+            if os.name == "posix":
+                directory = os.open(p.parent, os.O_RDONLY)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
         return str(p)
 
     @classmethod
