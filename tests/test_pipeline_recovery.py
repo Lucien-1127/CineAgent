@@ -304,3 +304,14 @@ def test_cli_mock_provider_uses_unique_temp_storage():
     first = cli._make_provider("mock")
     second = cli._make_provider("mock")
     assert first.out_dir != second.out_dir
+
+
+def test_cli_resume_rejects_mixed_aspect_ratios(tmp_path, monkeypatch, capsys):
+    provider, state, plans, runner = setup(tmp_path, total=10)
+    run(runner, state, plans)
+    saved = PipelineRunState.from_file(runner.state_file)
+    saved.segment(1).aspect_ratio = "16:9"
+    saved.to_file(runner.state_file)
+    monkeypatch.setattr(cli, "_make_provider", lambda _: pytest.fail("must not construct provider"))
+    assert cli.main(["--resume", runner.state_file]) == 1
+    assert "same aspect ratio" in capsys.readouterr().err

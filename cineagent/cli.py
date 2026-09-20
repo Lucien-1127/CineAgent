@@ -137,6 +137,13 @@ def _resume_run(args):
     return state, plans
 
 
+def _run_aspect(state, plans):
+    aspects = {state.segment(plan.segment_id).aspect_ratio for plan in plans}
+    if len(aspects) != 1:
+        raise ValueError("all segments in a run must share the same aspect ratio")
+    return aspects.pop()
+
+
 def main(argv=None):
     args = build_parser().parse_args(argv)
     try:
@@ -163,9 +170,9 @@ def main(argv=None):
                 return 0
             if not args.resume and (state_path.exists() or (output / "final.mp4").exists()):
                 raise ValueError("existing run found; use --resume or a new output directory")
+            aspect = _run_aspect(state, plans)
             provider = _make_provider(state.provider)
             runner = VideoPipelineRunner(provider, str(output), state_file=str(state_path))
-            aspect = state.segment(plans[0].segment_id).aspect_ratio
             state = asyncio.run(runner.run(state, plans, aspect=aspect))
             print(f"state: {state_path}\nstage: {state.current_stage}\ncompleted: {state.completed}")
             if state.last_error:
