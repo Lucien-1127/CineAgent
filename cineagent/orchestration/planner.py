@@ -6,6 +6,7 @@ segment is independently re-runnable and carries its frame/audio lineage.
 """
 from __future__ import annotations
 
+import math
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -20,6 +21,7 @@ class SegmentPlan(BaseModel):
     time_start: float = Field(ge=0.0)
     time_end: float = Field(ge=0.0)
     duration_seconds: float = Field(ge=0.0)
+    generation_duration_seconds: Optional[int] = Field(default=None, ge=1)
     provider: str
     model: str
     start_frame_source: Optional[str] = None    # keyframe | previous_last_frame | image_url
@@ -36,6 +38,8 @@ def plan_segments(
     overlap_seconds: float = 0.2,
     provider: str = "kling",
     model: str = "",
+    min_segment_duration: float = 1.0,
+    allowed_durations: Optional[List[int]] = None,
 ) -> List[SegmentPlan]:
     """Split `total_duration` into segments no longer than `max_segment_duration`.
 
@@ -45,6 +49,11 @@ def plan_segments(
     duplicate. The first segment's start frame is a keyframe; every later
     segment sources its start frame from the previous segment's last frame.
     """
+    if not all(math.isfinite(x) for x in
+               (total_duration, max_segment_duration, overlap_seconds, min_segment_duration)):
+        raise ValueError("durations must be finite")
+    if min_segment_duration <= 0 or min_segment_duration > max_segment_duration:
+        raise ValueError("invalid minimum segment duration")
     if total_duration <= 0:
         raise ValueError("total_duration must be positive")
     if max_segment_duration <= 0:
@@ -62,11 +71,21 @@ def plan_segments(
         dur = min(max_segment_duration, total_duration - start)
         end = start + dur
         previous = segment_id - 1 if segment_id > 0 else None
+        # Generate a legal whole-second clip, then trim to editorial duration.
+        generated = max(math.ceil(dur - 1e-9), math.ceil(min_segment_duration))
+        if allowed_durations is not None:
+            choices = [d for d in allowed_durations if generated <= d <= max_segment_duration]
+            if not choices:
+                raise ValueError("no legal generation duration for planned segment")
+            generated = min(choices)
+        if generated > max_segment_duration:
+            raise ValueError("segment maximum must allow a whole-second generation")
         plans.append(SegmentPlan(
             segment_id=segment_id,
             time_start=round(start, 3),
             time_end=round(end, 3),
             duration_seconds=round(dur, 3),
+            generation_duration_seconds=generated,
             provider=provider,
             model=model,
             start_frame_source="keyframe" if segment_id == 0 else "previous_last_frame",

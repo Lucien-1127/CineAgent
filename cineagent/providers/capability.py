@@ -141,8 +141,24 @@ def default_registry() -> CapabilityRegistry:
         reg.register(cap)
     for cap in _kling_caps():
         reg.register(cap)
+    from .video.orcarouter import KLING_MODELS, SEEDANCE, duration_policy
+    for model in sorted(KLING_MODELS | {SEEDANCE}):
+        supports = {"text_to_video", "image_to_video", "first_frame", "last_frame"}
+        aspect_ratios = ("16:9", "9:16", "1:1")
+        if model == SEEDANCE:
+            supports |= {"reference_image", "reference_video", "reference_audio", "audio_generation"}
+            aspect_ratios = ("16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive")
+        elif model in ("kling/kling-video-o1", "kling/kling-v3-omni"):
+            supports |= {"reference_image", "reference_video"}
+        if model in ("kling/kling-v3", "kling/kling-v3-omni", "kling/kling-v2-6"):
+            supports.add("audio_generation")
+        reg.register(ModelCapability(
+            provider="orcarouter", model=model, modalities=("video",),
+            supports=frozenset(supports), max_duration=duration_policy(model)[1],
+            aspect_ratios=aspect_ratios, resolution="1080p",
+            estimated_cost_usd=None, status="experimental"))
     # Declared-but-not-implemented vendors (status: planned, cost unknown).
-    for prov in ("runway", "veo", "sora", "luma", "orcarouter"):
+    for prov in ("runway", "veo", "sora", "luma"):
         reg.register(ModelCapability(
             provider=prov, model=f"{prov}-video", status="planned",
         ))

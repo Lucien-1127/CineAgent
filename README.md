@@ -116,3 +116,7 @@ docs/                 # 架構、遷移、provides、狀態
 ## 📜 授權
 
 MIT。
+
+## 續跑修正與 OrcaRouter（experimental）
+
+參閱 [影片任務復原與 OrcaRouter 串接](docs/video-recovery.md)。新的 CLI 預設使用 OrcaRouter，尚未完成真實付費生成驗收。既有離線測試結果不代表可以交付商業產品影片。

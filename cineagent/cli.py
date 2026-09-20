@@ -1,138 +1,190 @@
-"""CineAgent v4 video-pipeline CLI.
-
-The Seedance/Kling animation entry point (the v4 replacement for the legacy
-run_pipeline.py, which is retained only as migration history). Fully offline
-path via ``--video-provider mock``; real providers need env keys.
-"""
+"""Video CLI. Saved plans/inputs are authoritative when resuming a paid run."""
 from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import ExitStack
 import json
 import os
+from pathlib import Path
 import sys
 import uuid
-from pathlib import Path
 
-from .domain import PipelineRunState
+from .domain import Budget, PipelineRunState
 from .orchestration import VideoPipelineRunner, plan_segments
+from .orchestration.planner import SegmentPlan
 from .providers.capability import default_registry
+from .storage.run_lock import run_lock
 
-DEFAULT_MODELS = {
-    "kling": "kling-v3",
-    "seedance": "doubao-seedance-2-5-260628",
-    "mock": "mock-video",
-}
+DEFAULT_MODELS = {"kling": "kling-v3", "seedance": "doubao-seedance-2-5-260628",
+                  "mock": "mock-video", "orcarouter": "kling/kling-v3"}
 
 
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        prog="cineagent-video",
-        description="Seedance/Kling animation pipeline (5-15s segments, long-video segmentation).",
-    )
-    p.add_argument("--topic", required=True, help="animation objective / prompt")
-    p.add_argument("--video-provider", choices=["kling", "seedance", "mock"], default="kling")
-    p.add_argument("--model", default=None, help="override provider model id")
-    p.add_argument("--scenes", type=int, default=1, help="scene count hint (for per-scene prompts)")
-    p.add_argument("--duration", type=int, default=5, help="per-segment duration (s)")
-    p.add_argument("--total-duration", type=float, default=None, help="target film length (s)")
-    p.add_argument("--long-video", action="store_true", help="force segmentation")
-    p.add_argument("--plan-only", action="store_true", help="print the segment plan and exit")
-    p.add_argument("--segment-max-duration", type=float, default=None,
-                   help="max seconds per segment (default: model max)")
-    p.add_argument("--native-audio", action="store_true")
-    p.add_argument("--multi-shot", action="store_true",
-                   help="UNVERIFIED for Seedance/Kling; accepted but not forwarded")
-    p.add_argument("--resume", default=None, help="resume from a state JSON")
-    p.add_argument("--state-file", default=None, help="where to write the run state")
-    p.add_argument("--output-dir", default="/tmp/cineagent-run")
-    p.add_argument("--aspect", default="9:16")
-    p.add_argument("--resolution", default="720p")
+def build_parser():
+    p = argparse.ArgumentParser(prog="cineagent-video")
+    p.add_argument("--topic", help="required for a new run; omit when resuming")
+    p.add_argument("--video-provider", choices=list(DEFAULT_MODELS))
+    p.add_argument("--model")
+    p.add_argument("--scenes", type=int)
+    p.add_argument("--duration", type=int)
+    p.add_argument("--total-duration", type=float)
+    p.add_argument("--long-video", action="store_true")
+    p.add_argument("--plan-only", action="store_true")
+    p.add_argument("--segment-max-duration", type=float)
+    p.add_argument("--native-audio", action="store_true", default=None)
+    p.add_argument("--multi-shot", action="store_true")
+    p.add_argument("--independent-shots", action="store_true",
+                   help="separate clips without last-frame chaining (no upload required)")
+    p.add_argument("--image-url", help="public first-frame URL")
+    p.add_argument("--resume", help="existing checkpoint, restored without regeneration")
+    p.add_argument("--state-file")
+    p.add_argument("--output-dir")
+    p.add_argument("--aspect")
+    p.add_argument("--resolution")
     return p
 
 
-def _make_provider(name: str):
+def _make_provider(name):
+    if name == "orcarouter":
+        if not os.environ.get("ORCAROUTER_API_KEY"):
+            raise ValueError("ORCAROUTER_API_KEY is required")
+        from .providers.video.orcarouter import OrcaRouterVideoProvider
+        return OrcaRouterVideoProvider()
     if name == "mock":
         from .providers.video.mock_generation import MockGenerationProvider
-        return MockGenerationProvider(out_dir="/tmp/cineagent-run/mock", auto_succeed=True)
+        return MockGenerationProvider(out_dir=f"/tmp/cineagent-run/mock-{uuid.uuid4().hex[:12]}",
+                                      auto_succeed=True)
     if name == "seedance":
         if not os.environ.get("ARK_API_KEY"):
-            raise SystemExit("error: --video-provider seedance requires ARK_API_KEY")
+            raise ValueError("ARK_API_KEY is required")
         from .providers.video.seedance import SeedanceVideoProvider
         return SeedanceVideoProvider()
     if name == "kling":
         if not (os.environ.get("KLING_ACCESS_KEY") and os.environ.get("KLING_SECRET_KEY")):
-            raise SystemExit("error: --video-provider kling requires "
-                             "KLING_ACCESS_KEY and KLING_SECRET_KEY")
+            raise ValueError("KLING_ACCESS_KEY and KLING_SECRET_KEY are required")
         from .providers.video.kling import KlingVideoProvider
         return KlingVideoProvider()
-    raise SystemExit(f"error: unknown provider {name}")
+    raise ValueError("unknown provider")
 
 
-def main(argv=None) -> int:
-    args = build_parser().parse_args(argv)
-    if args.multi_shot:
-        print("warning: --multi-shot is UNVERIFIED for Seedance/Kling and is not "
-              "forwarded to the API", file=sys.stderr)
-
-    model = args.model or DEFAULT_MODELS.get(args.video_provider, "")
-    cap = default_registry().get(args.video_provider, model)
-    max_dur = args.segment_max_duration or (cap.max_duration if cap else args.duration)
-
-    total = args.total_duration or (args.duration * args.scenes)
-    if args.long_video or total > max_dur:
-        plans = plan_segments(total, max_dur, overlap_seconds=0.2,
-                              provider=args.video_provider, model=model)
+def _new_run(args):
+    if not args.topic:
+        raise ValueError("--topic is required for a new run")
+    provider = args.video_provider or "orcarouter"
+    model = args.model or DEFAULT_MODELS[provider]
+    if provider == "orcarouter":
+        from .providers.video.orcarouter import duration_policy
+        minimum, maximum, allowed = duration_policy(model)
     else:
-        plans = plan_segments(total, max(total, 1e-6), overlap_seconds=0.0,
-                              provider=args.video_provider, model=model)
-
-    if args.plan_only:
-        print(json.dumps([p.model_dump() for p in plans], ensure_ascii=False, indent=2))
-        return 0
-
-    if args.resume and Path(args.resume).exists():
-        state = PipelineRunState.from_file(args.resume)
-    else:
-        state = PipelineRunState(
-            run_id=f"run-{uuid.uuid4().hex[:12]}",
-            objective=args.topic,
-            locked_decisions=[
-                "Agnes 全面棄用",
-                "動畫只使用 Seedance 與 Kling",
-            ],
-            provider=args.video_provider,
-            model=model,
-        )
-
+        cap = default_registry().get(provider, model)
+        if not cap or cap.status == "planned":
+            raise ValueError("unknown or unimplemented provider/model")
+        minimum, maximum, allowed = 1, cap.max_duration, None
+        if provider == "kling":
+            minimum, allowed = 5, [5, 10]
+        elif provider == "seedance":
+            from .providers.video.seedance import MODEL_CAPS
+            minimum = MODEL_CAPS[model]["duration"][0]
+    max_dur = args.segment_max_duration if args.segment_max_duration is not None else maximum
+    if max_dur > maximum or max_dur < minimum:
+        raise ValueError("segment maximum outside model duration limits")
+    duration = args.duration if args.duration is not None else 5
+    scenes = args.scenes if args.scenes is not None else 1
+    if duration <= 0 or scenes <= 0:
+        raise ValueError("duration and scenes must be positive")
+    total = args.total_duration if args.total_duration is not None else duration * scenes
+    if total > 60:
+        raise ValueError("this CLI run budget is at most 60 seconds")
+    overlap = 0.0 if args.independent_shots or total <= max_dur else 0.2
+    plans = plan_segments(total, max_dur, overlap, provider, model,
+                          min_segment_duration=minimum, allowed_durations=allowed)
+    planned_total = plans[-1].time_end if plans else total
+    if args.independent_shots:
+        for plan in plans:
+            plan.start_frame_source, plan.previous_segment_id = "keyframe", None
+    state = PipelineRunState(run_id="run-" + uuid.uuid4().hex[:12], objective=args.topic,
+        provider=provider, model=model,
+        budget=Budget(max_total_duration_seconds=planned_total),
+        locked_decisions=["Agnes 全面棄用", "動畫只使用 Seedance 與 Kling"],
+        plans=[plan.model_dump() for plan in plans],
+        planned_total_duration_seconds=planned_total)
     for plan in plans:
         seg = state.ensure_segment(plan.segment_id)
-        seg.duration_seconds = plan.duration_seconds
-        seg.provider = plan.provider
-        seg.model = plan.model
         seg.prompt = args.topic
-        seg.aspect_ratio = args.aspect
-        seg.resolution = args.resolution
-        seg.native_audio = args.native_audio
+        seg.provider, seg.model = provider, model
+        seg.aspect_ratio, seg.resolution = args.aspect or "9:16", args.resolution or "720p"
+        seg.native_audio = bool(args.native_audio)
+        seg.image_url = args.image_url
+    return state, plans
 
-    provider = _make_provider(args.video_provider)
-    runner = VideoPipelineRunner(provider, args.output_dir)
-    state = asyncio.run(runner.run(state, plans, aspect=args.aspect))
 
-    state_file = args.state_file or str(Path(args.output_dir) / "state.json")
-    state.to_file(state_file)
-    print(f"state: {state_file}")
-    print(f"stage: {state.current_stage}")
-    print(f"completed: {state.completed}")
-    print(f"failed: {state.failed}")
-    if state.blockers:
-        print(f"blockers: {state.blockers}")
-    if state.last_error:
-        print(f"last_error: {state.last_error}")
-    final = Path(args.output_dir) / "final.mp4"
-    if final.exists():
-        print(f"final: {final}")
-    return 0 if (not state.failed and not state.blockers) else 1
+def _resume_run(args):
+    if not Path(args.resume).is_file():
+        raise ValueError("resume file does not exist; refusing to start a new paid run")
+    state = PipelineRunState.from_file(args.resume)
+    if not state.plans:
+        raise ValueError("legacy checkpoint has no durable plan; reconcile/migrate before resume")
+    for field, current in (("video_provider", state.provider), ("model", state.model),
+                           ("topic", state.objective)):
+        supplied = getattr(args, field)
+        if supplied is not None and supplied != current:
+            raise ValueError(f"--{field.replace('_', '-')} conflicts with saved run")
+    if any(getattr(args, f) is not None for f in ("duration", "scenes", "total_duration",
+            "segment_max_duration", "aspect", "resolution", "native_audio", "image_url")) or args.independent_shots or args.long_video:
+        raise ValueError("resume restores saved inputs; generation overrides are not allowed")
+    plans = [SegmentPlan.model_validate(p) for p in state.plans]
+    if set(state.segments) != {str(p.segment_id) for p in plans}:
+        raise ValueError("checkpoint segments do not match saved plans")
+    return state, plans
+
+
+def _run_aspect(state, plans):
+    aspects = {state.segment(plan.segment_id).aspect_ratio for plan in plans}
+    if len(aspects) != 1:
+        raise ValueError("all segments in a run must share the same aspect ratio")
+    return aspects.pop()
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    try:
+        if args.multi_shot:
+            raise ValueError("multi-shot authoring is not implemented")
+        resume_path = Path(args.resume).resolve() if args.resume else None
+        # Lock the checkpoint before reading it, then lock the resolved output directory
+        # before starting or resuming a job.
+        output = Path(args.output_dir or (str(resume_path.parent) if resume_path
+                      else "/tmp/cineagent-run/" + uuid.uuid4().hex[:12])).resolve()
+        state_path = Path(args.state_file or args.resume or output / "state.json").resolve()
+        if args.resume and state_path != resume_path:
+            raise ValueError("resume must update the original checkpoint")
+        with ExitStack() as stack:
+            if not args.plan_only:
+                stack.enter_context(run_lock(str(state_path) + ".lock"))
+            state, plans = _resume_run(args) if args.resume else _new_run(args)
+            if args.resume and not args.output_dir and state.workdir:
+                output = Path(state.workdir).resolve()
+            if not args.plan_only:
+                stack.enter_context(run_lock(str(output / ".run.lock")))
+            if args.plan_only:
+                print(json.dumps([p.model_dump() for p in plans], ensure_ascii=False, indent=2))
+                return 0
+            if not args.resume and (state_path.exists() or (output / "final.mp4").exists()):
+                raise ValueError("existing run found; use --resume or a new output directory")
+            aspect = _run_aspect(state, plans)
+            provider = _make_provider(state.provider)
+            runner = VideoPipelineRunner(provider, str(output), state_file=str(state_path))
+            state = asyncio.run(runner.run(state, plans, aspect=aspect))
+            print(f"state: {state_path}\nstage: {state.current_stage}\ncompleted: {state.completed}")
+            if state.last_error:
+                print(f"last_error: {state.last_error}", file=sys.stderr)
+            if state.current_stage == "STITCHED" and state.final_path and Path(state.final_path).is_file():
+                print(f"final: {state.final_path}")
+                return 0
+            return 1
+    except (ValueError, OSError, RuntimeError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

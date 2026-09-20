@@ -73,6 +73,10 @@ class SeedanceVideoProvider:
     """Volcano Engine Ark Seedance video generation."""
 
     name = "seedance"
+    requires_public_media = True
+
+    def validate_request(self, request):
+        self.build_payload(request)
 
     def __init__(
         self,

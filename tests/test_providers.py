@@ -25,6 +25,12 @@ def test_capability_registry_has_mock_and_planned_vendors():
     assert reg.get("veo", "veo-video").status == "planned"
 
 
+def test_orcarouter_seedance_capabilities_match_adapter_ratios():
+    cap = default_registry().get("orcarouter", "byteplus/dreamina-seedance-2-0-260128")
+    assert cap is not None
+    assert cap.aspect_ratios == ("16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive")
+
+
 def test_model_router_selects_feasible_mock():
     router = ModelRouter(default_registry())
     chain = router.select(

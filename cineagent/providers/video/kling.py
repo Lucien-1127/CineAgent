@@ -53,6 +53,10 @@ class KlingVideoProvider:
     """Kling legacy video generation (image2video / text2video)."""
 
     name = "kling"
+    requires_public_media = True
+
+    def validate_request(self, request):
+        self.build_payload(request)
 
     def __init__(
         self,
