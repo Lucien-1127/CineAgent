@@ -139,18 +139,22 @@ def main(argv=None):
     try:
         if args.multi_shot:
             raise ValueError("multi-shot authoring is not implemented")
-        # Lock both checkpoint and output directory before reading or starting a job.
-        saved_workdir = PipelineRunState.from_file(args.resume).workdir if args.resume else None
-        output = Path(args.output_dir or saved_workdir or (str(Path(args.resume).resolve().parent) if args.resume
-                                         else "/tmp/cineagent-run/" + uuid.uuid4().hex[:12])).resolve()
+        resume_path = Path(args.resume).resolve() if args.resume else None
+        # Lock the checkpoint before reading it, then lock the resolved output directory
+        # before starting or resuming a job.
+        output = Path(args.output_dir or (str(resume_path.parent) if resume_path
+                      else "/tmp/cineagent-run/" + uuid.uuid4().hex[:12])).resolve()
         state_path = Path(args.state_file or args.resume or output / "state.json").resolve()
-        if args.resume and state_path != Path(args.resume).resolve():
+        if args.resume and state_path != resume_path:
             raise ValueError("resume must update the original checkpoint")
         with ExitStack() as stack:
             if not args.plan_only:
-                for lock_path in sorted({str(state_path) + ".lock", str(output / ".run.lock")}):
-                    stack.enter_context(run_lock(lock_path))
+                stack.enter_context(run_lock(str(state_path) + ".lock"))
             state, plans = _resume_run(args) if args.resume else _new_run(args)
+            if args.resume and not args.output_dir and state.workdir:
+                output = Path(state.workdir).resolve()
+            if not args.plan_only:
+                stack.enter_context(run_lock(str(output / ".run.lock")))
             if args.plan_only:
                 print(json.dumps([p.model_dump() for p in plans], ensure_ascii=False, indent=2))
                 return 0

@@ -210,6 +210,7 @@ def test_cli_resume_restores_provider_plan_and_inputs(tmp_path, monkeypatch):
     selected = []
     monkeypatch.setattr(cli, "_make_provider", lambda name: selected.append(name) or provider)
     async def inspect(self, saved, restored, **kwargs):
+        assert self.workdir == Path(saved.workdir)
         assert saved.objective == "product"
         assert restored == plans
         assert saved.segment(0).prompt == "product"
@@ -222,9 +223,10 @@ def test_cli_resume_restores_provider_plan_and_inputs(tmp_path, monkeypatch):
     assert selected == ["fake-video"]
 
 
-def test_missing_resume_does_not_construct_provider(tmp_path, monkeypatch):
+def test_missing_resume_does_not_construct_provider(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli, "_make_provider", lambda _: pytest.fail("must not create provider"))
     assert cli.main(["--resume", str(tmp_path / "missing.json")]) == 1
+    assert "resume file does not exist" in capsys.readouterr().err
 
 
 def test_atomic_checkpoint_failure_preserves_previous_file(tmp_path, monkeypatch):

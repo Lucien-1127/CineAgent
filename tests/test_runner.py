@@ -51,6 +51,20 @@ def test_resume_skips_completed(tmp_path):
     assert state.completed == [0, 1]
 
 
+def test_resume_restores_budget_from_saved_plan(tmp_path):
+    prov = FakeVideoProvider(str(tmp_path))
+    plans = _plans(total=70, max_dur=35)
+    state = _state()
+    state.plans = [plan.model_dump() for plan in plans]
+
+    runner = VideoPipelineRunner(prov, str(tmp_path / "out"), poll_interval=0.0)
+    state = _run(runner.run(state, plans, stitch=False))
+
+    assert state.budget.max_total_duration_seconds == 70
+    assert prov.create_calls == [0, 1]
+    assert state.completed == [0, 1]
+
+
 def test_retry_cap_exhausted(tmp_path):
     class RateLimitProvider(FakeVideoProvider):
         async def create_task(self, request):
