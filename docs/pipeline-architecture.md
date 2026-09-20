@@ -1,5 +1,10 @@
 # 🏗️ AI Media Pipeline — 流水線架構
 
+> ⚠️ **本文件為 v3 遷移歷史**。內容描述 Agnes 時期的三階段流水線（Agnes Image／Video、
+> Frame Chaining、`agents_workflow_state.json`），**不再是現行架構**。現行動畫層只支援
+> Seedance 與 Kling，見 `docs/video-pipeline.md`、`docs/video-production.md`、
+> `docs/architecture-v4.md`。以下內容僅供歷史參考，不應作為實作依據。
+
 ## 三階段流程
 
 ### 全景圖

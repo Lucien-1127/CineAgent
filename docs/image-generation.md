@@ -1,5 +1,8 @@
 # 🖼️ 圖片生成路由
 
+> ⚠️ **v3 遷移歷史**：本文件描述的 Agnes Image 路由已停用。現行圖片 Provider 走
+> `cineagent/providers/image/` 抽象；動畫 Provider 見 `docs/video-production.md`。
+
 ## 路由決策樹
 
 ```
