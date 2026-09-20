@@ -96,6 +96,7 @@ class PipelineRunState(BaseModel):
     blockers: List[str] = Field(default_factory=list)
     last_error: Optional[str] = None
     plans: List[Dict[str, Any]] = Field(default_factory=list)
+    planned_total_duration_seconds: Optional[float] = None
     seam_failures: List[str] = Field(default_factory=list)
     final_path: Optional[str] = None
     workdir: Optional[str] = None
@@ -135,7 +136,10 @@ class PipelineRunState(BaseModel):
     @classmethod
     def from_file(cls, path: str) -> "PipelineRunState":
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
-        return cls.model_validate(raw)
+        state = cls.model_validate(raw)
+        if state.planned_total_duration_seconds is None and state.plans:
+            state.planned_total_duration_seconds = max(float(p.get("time_end", 0.0)) for p in state.plans)
+        return state
 
 
 __all__ = ["SegmentState", "Budget", "PipelineRunState"]

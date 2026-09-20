@@ -10,7 +10,7 @@ from pathlib import Path
 import sys
 import uuid
 
-from .domain import PipelineRunState
+from .domain import Budget, PipelineRunState
 from .orchestration import VideoPipelineRunner, plan_segments
 from .orchestration.planner import SegmentPlan
 from .providers.capability import default_registry
@@ -102,8 +102,10 @@ def _new_run(args):
             plan.start_frame_source, plan.previous_segment_id = "keyframe", None
     state = PipelineRunState(run_id="run-" + uuid.uuid4().hex[:12], objective=args.topic,
         provider=provider, model=model,
+        budget=Budget(max_total_duration_seconds=total),
         locked_decisions=["Agnes 全面棄用", "動畫只使用 Seedance 與 Kling"],
-        plans=[plan.model_dump() for plan in plans])
+        plans=[plan.model_dump() for plan in plans],
+        planned_total_duration_seconds=total)
     for plan in plans:
         seg = state.ensure_segment(plan.segment_id)
         seg.prompt = args.topic

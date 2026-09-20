@@ -76,9 +76,10 @@ class VideoPipelineRunner:
             if state.plans and state.plans != serialized:
                 raise BlockerError("plan differs from checkpoint; start a separate run")
             planned_duration = ordered[-1].time_end
-            if state.plans and state.budget.max_total_duration_seconds < planned_duration:
-                state.budget.max_total_duration_seconds = planned_duration
-            if planned_duration > state.budget.max_total_duration_seconds:
+            budget_limit = (state.planned_total_duration_seconds
+                            if state.planned_total_duration_seconds is not None
+                            else state.budget.max_total_duration_seconds)
+            if planned_duration > budget_limit:
                 raise BlockerError("planned duration exceeds run budget")
             if stitch and (not shutil.which("ffmpeg") or not shutil.which("ffprobe")):
                 raise BlockerError("ffmpeg and ffprobe are required before generation")
