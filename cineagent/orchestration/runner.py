@@ -70,7 +70,7 @@ class VideoPipelineRunner:
         for plan in ordered:
             seg = self._ensure(plan, state)
             if seg.is_complete:
-                prev_last_frame = seg.local_path
+prev_last_frame = self._tail_frame(seg)
                 continue
 
             # continuity: use the previous segment's tail frame as this
