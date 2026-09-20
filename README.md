@@ -32,8 +32,10 @@ Provider、可逐步驗證的 Production System。狀態標示遵守 `implemente
   （Library → Stock → Generate），`cineagent/assets/`。
 - **Model Capability Registry + ModelRouter**：依 modality/cost/budget 選
   provider+model+fallback chain（`cineagent/providers/capability.py`）。
-- **Image / Video Provider**：介面 + Mock（durable、idempotent remote job、
-  poll lifecycle），`cineagent/providers/`。
+- **Image / Video Provider**：介面 + Mock（durable、idempotent remote job、poll lifecycle）；
+  **Seedance / Kling 動畫 adapter**（experimental，官方文件驗證）＋ 統一 schema、分段規劃、
+  首尾幀接縫、狀態續傳、執行器與 CLI（`cineagent/providers/`、`cineagent/orchestration/`、
+  `cineagent/cli.py`）。
 - **Renderer**：`RendererProvider` 抽象；`FFmpegRenderer`（實作出可播放 MP4：
   拼接、字幕燒錄、音軌混音）；`RemotionRenderer`（primary，`planned`）。
 - **QA**：`TechnicalQA`（ffprobe：可解碼/時長/fps/解析度/音軌/比例/大小）、
@@ -50,7 +52,7 @@ Provider、可逐步驗證的 Production System。狀態標示遵守 `implemente
 
 ```bash
 pip install -e ".[dev]"
-python -m pytest -q                       # 56 tests（含 E2E offline smoke）
+python -m pytest -q                       # 120 tests（含 E2E offline smoke）
 ```
 
 完整測試類別：Unit、Integration、Provider Mock、State Recovery、Idempotency、
@@ -91,7 +93,7 @@ docs/                 # 架構、遷移、provides、狀態
 | Audio-first timeline | implemented |
 | Storyboard / VisualBible | implemented |
 | Asset Router | implemented |
-| Model Capability Router | implemented (僅 mock provider) |
+| Model Capability Router | implemented（mock + Seedance/Kling 已註冊） |
 | Image/Video Mock providers | implemented |
 | FFmpeg Renderer | implemented |
 | Remotion Renderer | planned |
@@ -99,7 +101,9 @@ docs/                 # 架構、遷移、provides、狀態
 | Visual QA (multimodal) | planned (介面 implemented) |
 | Publishers (dry-run) | implemented |
 | 真實發片(YouTube 等 API) | planned |
-| Kling/Runway/Veo/Sora/Luma/OrcaRouter | planned |
+| Seedance adapter（＋統一 schema/planner/stitching/runner/CLI） | experimental |
+| Kling adapter | experimental |
+| Runway/Veo/Sora/Luma/OrcaRouter | planned |
 
 ---
 

@@ -4,7 +4,7 @@ Provider-neutral、shot-based、reference-first、audio-timeline-driven 的 AI �
 
 ## 核心規則
 
-1. **Agnes 已停用**：AgnesAPI 與 run_pipeline.py（v3）非 v4；僅作 migration 歷史保留。
+1. **Agnes 已停用**：AgnesAPI 與 run_pipeline.py（v3）非 v4；動畫只支援 Seedance 與 Kling；其餘僅作 migration 歷史保留。
 2. **Provider 抽象化**：Pipeline 只碰 providers/base.py 與各 modality 介面；vendor payload 只在 adapter 內。
 3. **Scene 與 Shot 分離**：Shot = 可獨立恢復的最小生成單位；Audio Master Timeline 定時長。
 4. **Reference-first**：VisualBible 集中角色/場景/服裝/燈光/鏡頭語言；優先 reference image/video。
@@ -22,8 +22,10 @@ Provider-neutral、shot-based、reference-first、audio-timeline-driven 的 AI �
 - Audio-First Timeline + MasterTimeline + captions/SRT（orchestration/、media/）.
 - Storyboard + VisualBible + PromptCompiler（vendor gate）.
 - Asset Router（hash dedup/semantic reuse，cineagent/assets/）.
-- Model Capability Router（providers/capability.py，僅 mock 註冊）.
+- Model Capability Router（providers/capability.py；mock implemented + Seedance/Kling experimental 已註冊）.
 - Image/Video/Audio/Text Provider 介面 + Mock（durable/idempotent，providers/）.
+- Seedance / Kling 動畫 adapter（providers/video/seedance.py、kling.py；official-doc 驗證，experimental）.
+- 動畫流水線：統一 schema、分段規劃 planner、首尾幀接縫 stitching、狀態續傳 state、執行器 runner、CLI（providers/video/schemas.py、orchestration/、domain/pipeline.py、cli.py）.
 - FFmpegRenderer（組出可播放 MP4，`renderer/`）；RemotionRenderer=planned。
 - TechnicalQA（ffprobe）；VisualQAProvider 介面 + Mock（真實模型 planned）。
 - Publishers（YouTube/TikTok/Instagram/X/Telegram，皆 dry-run）.
@@ -38,7 +40,7 @@ source .venv/bin/activate
 python -m pytest -q
 ```
 
-已驗證基線：56 測試全數通過。所有 Provider 需有 Mock test。
+已驗證基線：120 測試全數通過。所有 Provider 需有 Mock test。
 
 
 
@@ -49,7 +51,7 @@ tests/   docs/   .github/workflows/ci.yml
 
 ## planned（未完成）
 
-RemotionRenderer（Node 未接線）、真實 vendor adapters（Kling/Runway/Veo/Sora/Luma/OrcaRouter）、
+RemotionRenderer（Node 未接線）、真實 vendor adapters（Runway/Veo/Sora/Luma/OrcaRouter；Seedance/Kling 已 experimental）、
 真實 Publisher 發片 API（目前 dry-run）、真實 Visual QA 模型、真實 TTS（ElevenLabs/OpenAI/local）
 + forced alignment、Provider estimated_cost 真實價格註冊。以上完成並過測後才可改標 implemented。
 

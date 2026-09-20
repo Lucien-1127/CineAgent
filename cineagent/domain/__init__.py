@@ -18,6 +18,7 @@ from .enums import (
     ShotState,
 )
 from .job import GenerationJob, QAReport
+from .pipeline import Budget, PipelineRunState, SegmentState
 from .project import VideoProject
 from .script import (
     CreativeBrief,
@@ -37,6 +38,7 @@ __all__ = [
     "Asset",
     "AssetSource",
     "AssetType",
+    "Budget",
     "CameraAngle",
     "CameraMotion",
     "CaptionCue",
@@ -51,6 +53,7 @@ __all__ = [
     "Language",
     "MasterTimeline",
     "OperationKind",
+    "PipelineRunState",
     "Platform",
     "ProjectStatus",
     "QAReport",
@@ -59,6 +62,7 @@ __all__ = [
     "Scene",
     "ScriptPackage",
     "ScriptStrategy",
+    "SegmentState",
     "ShotSize",
     "ShotSpec",
     "ShotState",

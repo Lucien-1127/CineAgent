@@ -1,6 +1,6 @@
 # Provider 契約 (provider-contract)
 
-狀態：`implemented`（介面）/ `planned`（vendor adapters）。
+狀態：`implemented`（介面／離線 pipeline）／ `experimental`（Seedance/Kling adapter）／ `planned`（其餘 vendor adapters）。
 
 ## 原則
 
@@ -13,7 +13,7 @@ vendor 專屬 payload 一律放在各 adapter 內。
 |------|------|----------------|
 | TextProvider | `providers/base.py` | Mock |
 | ImageProvider | `providers/image/base.py` | Mock |
-| VideoProvider | `providers/video/base.py` | Mock（durable/idempotent） |
+| VideoProvider | `providers/video/base.py` | Mock + Seedance + Kling（durable/idempotent） |
 | AudioProvider | `providers/audio/base.py` | Mock（native timestamps） |
 
 ## Error taxonomy（禁止單一 except Exception）
@@ -48,6 +48,8 @@ vendor 專屬 payload 一律放在各 adapter 內。
 | Vendor | 狀態 | 註 |
 |--------|------|----|
 | mock | implemented | 離線測試 |
-| Kling / Runway / Veo / Sora / Luma / OrcaRouter | planned | 查官方文件後再註冊 |
+| Seedance | experimental | 官方文件驗證（Ark），未接真實 API |
+| Kling | experimental | 官方 upstream 鏡像驗證，未接真實 API |
+| Runway / Veo / Sora / Luma / OrcaRouter | planned | 查官方文件後再註冊 |
 
 > OrcaRouter 可作為 Provider Gateway 之一，但 CineAgent 不得依賴它才能運作。
