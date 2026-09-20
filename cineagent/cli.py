@@ -79,7 +79,7 @@ def _new_run(args):
         cap = default_registry().get(provider, model)
         if not cap or cap.status == "planned":
             raise ValueError("unknown or unimplemented provider/model")
-        maximum, minimum, allowed = cap.max_duration, 1, None
+        minimum, maximum, allowed = 1, cap.max_duration, None
         if provider == "kling":
             minimum, allowed = 5, [5, 10]
         elif provider == "seedance":
@@ -98,15 +98,16 @@ def _new_run(args):
     overlap = 0.0 if args.independent_shots or total <= max_dur else 0.2
     plans = plan_segments(total, max_dur, overlap, provider, model,
                           min_segment_duration=minimum, allowed_durations=allowed)
+    planned_total = plans[-1].time_end if plans else total
     if args.independent_shots:
         for plan in plans:
             plan.start_frame_source, plan.previous_segment_id = "keyframe", None
     state = PipelineRunState(run_id="run-" + uuid.uuid4().hex[:12], objective=args.topic,
         provider=provider, model=model,
-        budget=Budget(max_total_duration_seconds=total),
+        budget=Budget(max_total_duration_seconds=planned_total),
         locked_decisions=["Agnes 全面棄用", "動畫只使用 Seedance 與 Kling"],
         plans=[plan.model_dump() for plan in plans],
-        planned_total_duration_seconds=total)
+        planned_total_duration_seconds=planned_total)
     for plan in plans:
         seg = state.ensure_segment(plan.segment_id)
         seg.prompt = args.topic

@@ -92,6 +92,22 @@ def test_stitch_rejects_non_uniform_overlap(tmp_path):
         _run(runner._stitch(segments, "9:16", 30))
 
 
+def test_stitch_value_error_marks_run_failed(tmp_path, monkeypatch):
+    runner = VideoPipelineRunner(FakeVideoProvider(str(tmp_path)), str(tmp_path / "out"), poll_interval=0.0)
+    state = _state()
+    plans = _plans()
+
+    monkeypatch.setattr("cineagent.orchestration.runner.shutil.which", lambda _: "/usr/bin/fake")
+    async def fail(*args, **kwargs):
+        raise ValueError("bad overlap")
+
+    monkeypatch.setattr(runner, "_stitch", fail)
+    state = _run(runner.run(state, plans, stitch=True))
+
+    assert state.current_stage == "FAILED"
+    assert state.last_error == "stitch failed: bad overlap"
+
+
 def test_retry_cap_exhausted(tmp_path):
     class RateLimitProvider(FakeVideoProvider):
         async def create_task(self, request):

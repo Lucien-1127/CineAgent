@@ -315,3 +315,13 @@ def test_cli_resume_rejects_mixed_aspect_ratios(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli, "_make_provider", lambda _: pytest.fail("must not construct provider"))
     assert cli.main(["--resume", runner.state_file]) == 1
     assert "same aspect ratio" in capsys.readouterr().err
+
+
+def test_new_run_persists_planned_total_from_plan_end():
+    args = cli.build_parser().parse_args([
+        "--topic", "product", "--video-provider", "mock", "--total-duration", "10.1",
+        "--segment-max-duration", "10",
+    ])
+    state, plans = cli._new_run(args)
+    assert state.planned_total_duration_seconds == plans[-1].time_end
+    assert state.budget.max_total_duration_seconds == plans[-1].time_end

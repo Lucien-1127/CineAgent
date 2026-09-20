@@ -160,7 +160,7 @@ class VideoPipelineRunner:
             except (MediaCommandError, MediaToolMissing, OSError, ValueError, RuntimeError) as exc:
                 state.current_stage = "FAILED"
                 state.last_error = f"stitch failed: {exc}"
-        except (BlockerError, AuthError, ValidationError, ValueError) as exc:
+        except (BlockerError, AuthError, ValidationError) as exc:
             state.blockers.append(str(exc))
             state.last_error = str(exc)
             state.current_stage = "BLOCKED"
