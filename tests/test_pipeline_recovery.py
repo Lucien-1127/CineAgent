@@ -298,3 +298,9 @@ def test_mock_process_restart_recovers_completed_source(tmp_path):
     result = asyncio.run(provider.get_task(rid))
     assert result.state == VideoTaskState.SUCCEEDED
     assert result.video_url == str(tmp_path / f"{rid}.mp4")
+
+
+def test_cli_mock_provider_uses_unique_temp_storage():
+    first = cli._make_provider("mock")
+    second = cli._make_provider("mock")
+    assert first.out_dir != second.out_dir

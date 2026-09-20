@@ -291,7 +291,11 @@ class VideoPipelineRunner:
         return extract_last_frame_safe(seg.local_path, str(self.workdir / f"last_frame_{seg.segment_id}.png"))
 
     async def _stitch(self, segments, aspect, fps):
-        overlap = max(0.0, segments[0].time_end - segments[1].time_start) if len(segments) > 1 else 0.0
+        overlaps = [max(0.0, previous.time_end - current.time_start)
+                    for previous, current in zip(segments, segments[1:])]
+        overlap = overlaps[0] if overlaps else 0.0
+        if any(abs(value - overlap) > 1e-6 for value in overlaps[1:]):
+            raise ValueError("stitching requires a uniform overlap between adjacent segments")
         partial = self.workdir / "final.rendering.mp4"
         partial.unlink(missing_ok=True)
         await stitch_segments([s.local_path for s in segments], [s.duration_seconds for s in segments],

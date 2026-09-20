@@ -7,6 +7,7 @@ from cineagent.domain import Budget, PipelineRunState
 from cineagent.orchestration import VideoPipelineRunner, plan_segments
 from cineagent.providers.base import AuthError, RateLimitError
 from conftest import FakeVideoProvider
+import pytest
 
 
 def _run(coro):
@@ -71,6 +72,24 @@ def test_resume_restores_budget_from_saved_plan(tmp_path):
     assert state.budget.max_total_duration_seconds == 60
     assert prov.create_calls == [0, 1]
     assert state.completed == [0, 1]
+
+
+def test_stitch_rejects_non_uniform_overlap(tmp_path):
+    runner = VideoPipelineRunner(FakeVideoProvider(str(tmp_path)), str(tmp_path / "out"), poll_interval=0.0)
+    segments = [
+        state for state in (
+            PipelineRunState(run_id="s0").ensure_segment(0),
+            PipelineRunState(run_id="s1").ensure_segment(1),
+            PipelineRunState(run_id="s2").ensure_segment(2),
+        )
+    ]
+    for seg, start, end in zip(segments, (0.0, 4.5, 9.0), (5.0, 9.8, 14.8)):
+        seg.time_start = start
+        seg.time_end = end
+        seg.duration_seconds = end - start
+        seg.local_path = str(tmp_path / f"{seg.segment_id}.mp4")
+    with pytest.raises(ValueError, match="uniform overlap"):
+        _run(runner._stitch(segments, "9:16", 30))
 
 
 def test_retry_cap_exhausted(tmp_path):

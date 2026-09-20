@@ -52,7 +52,8 @@ def _make_provider(name):
         return OrcaRouterVideoProvider()
     if name == "mock":
         from .providers.video.mock_generation import MockGenerationProvider
-        return MockGenerationProvider(out_dir="/tmp/cineagent-run/mock", auto_succeed=True)
+        return MockGenerationProvider(out_dir=f"/tmp/cineagent-run/mock-{uuid.uuid4().hex[:12]}",
+                                      auto_succeed=True)
     if name == "seedance":
         if not os.environ.get("ARK_API_KEY"):
             raise ValueError("ARK_API_KEY is required")
