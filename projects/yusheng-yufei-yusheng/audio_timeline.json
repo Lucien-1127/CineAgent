@@ -1,0 +1,371 @@
+{
+  "project": "魚生・于飛・餘生",
+  "duration_seconds": 112,
+  "voice_profiles": {
+    "YUCHENG": "成年台灣男性，28歲，低沉溫和，收斂情緒，語速自然，不作舞台式吶喊",
+    "YUYU": "成年台灣男性，24歲，清澈帶一點鼻音，情感敏感但不刻意幼態化",
+    "YU_CHENG_VO": "育呈的內心獨白，稍低聲、停頓有呼吸感"
+  },
+  "no_auto_dialogue_generation": true,
+  "notes": "CineAgent 現有 run_pipeline.py 未實作 TTS、對嘴、背景音訊混音或 MP4 串接；本檔是製作時碼契約，需外部配音工具與剪輯工具處理。音訊以全片絕對秒數標記；台語口音不是必需。",
+  "cues": [
+    {
+      "cue_id": "S01-A1",
+      "scene_id": 0,
+      "speaker": "NARRATOR",
+      "text": "那場雨，我先看見了他的傷。",
+      "start_second": 1,
+      "end_second": 5.9,
+      "voice_profile": "YU_CHENG_VO",
+      "require_lipsync": false
+    },
+    {
+      "cue_id": "S02-A1",
+      "scene_id": 1,
+      "speaker": "YUCHENG",
+      "text": "還會痛嗎？",
+      "start_second": 7.7,
+      "end_second": 9.4,
+      "voice_profile": "YUCHENG",
+      "require_lipsync": true
+    },
+    {
+      "cue_id": "S02-A2",
+      "scene_id": 1,
+      "speaker": "YUYU",
+      "text": "會啊，只是習慣了。",
+      "start_second": 10.1,
+      "end_second": 12.5,
+      "voice_profile": "YUYU",
+      "require_lipsync": true
+    },
+    {
+      "cue_id": "S03-A1",
+      "scene_id": 2,
+      "speaker": "YUYU",
+      "text": "你看起來，也很累。",
+      "start_second": 14.8,
+      "end_second": 17.2,
+      "voice_profile": "YUYU",
+      "require_lipsync": true
+    },
+    {
+      "cue_id": "S03-A2",
+      "scene_id": 2,
+      "speaker": "NARRATOR",
+      "text": "原來他也看見了我。",
+      "start_second": 17.7,
+      "end_second": 20.4,
+      "voice_profile": "YU_CHENG_VO",
+      "require_lipsync": false
+    },
+    {
+      "cue_id": "S04-A1",
+      "scene_id": 3,
+      "speaker": "NARRATOR",
+      "text": "從那天起，我開始期待明天。",
+      "start_second": 22,
+      "end_second": 27,
+      "voice_profile": "YU_CHENG_VO",
+      "require_lipsync": false
+    },
+    {
+      "cue_id": "S05-A1",
+      "scene_id": 4,
+      "speaker": "YUCHENG",
+      "text": "晚餐留給你了。",
+      "start_second": 28.8,
+      "end_second": 31,
+      "voice_profile": "YUCHENG",
+      "require_lipsync": true
+    },
+    {
+      "cue_id": "S05-A2",
+      "scene_id": 4,
+      "speaker": "YUYU",
+      "text": "你怎麼每次都等我。",
+      "start_second": 31.4,
+      "end_second": 33.9,
+      "voice_profile": "YUYU",
+      "require_lipsync": true
+    },
+    {
+      "cue_id": "S06-A1",
+      "scene_id": 5,
+      "speaker": "YUYU",
+      "text": "育呈，你也需要被照顧啊。",
+      "start_second": 35.7,
+      "end_second": 38.7,
+      "voice_profile": "YUYU",
+      "require_lipsync": true
+    },
+    {
+      "cue_id": "S06-A2",
+      "scene_id": 5,
+      "speaker": "NARRATOR",
+      "text": "我一直記得。",
+      "start_second": 39.1,
+      "end_second": 41.3,
+      "voice_profile": "YU_CHENG_VO",
+      "require_lipsync": false
+    },
+    {
+      "cue_id": "S07-A1",
+      "scene_id": 6,
+      "speaker": "YUYU",
+      "text": "我考過了。",
+      "start_second": 42.7,
+      "end_second": 45.4,
+      "voice_profile": "YUYU",
+      "require_lipsync": true
+    },
+    {
+      "cue_id": "S07-A2",
+      "scene_id": 6,
+      "speaker": "NARRATOR",
+      "text": "可是那天，我沒有趕到。",
+      "start_second": 45.7,
+      "end_second": 48.4,
+      "voice_profile": "YU_CHENG_VO",
+      "require_lipsync": false
+    },
+    {
+      "cue_id": "S08-A1",
+      "scene_id": 7,
+      "speaker": "YUYU",
+      "text": "我想要你在，不是事後補償。",
+      "start_second": 49.6,
+      "end_second": 52.7,
+      "voice_profile": "YUYU",
+      "require_lipsync": true
+    },
+    {
+      "cue_id": "S08-A2",
+      "scene_id": 7,
+      "speaker": "YUCHENG",
+      "text": "對不起。",
+      "start_second": 53,
+      "end_second": 55.1,
+      "voice_profile": "YUCHENG",
+      "require_lipsync": true
+    },
+    {
+      "cue_id": "S09-A1",
+      "scene_id": 8,
+      "speaker": "YUYU",
+      "text": "我也想去看看，自己能走多遠。",
+      "start_second": 56.7,
+      "end_second": 62,
+      "voice_profile": "YUYU",
+      "require_lipsync": true
+    },
+    {
+      "cue_id": "S10-A1",
+      "scene_id": 9,
+      "speaker": "YUCHENG",
+      "text": "你早就決定了，卻沒有告訴我。",
+      "start_second": 63.8,
+      "end_second": 68.9,
+      "voice_profile": "YUCHENG",
+      "require_lipsync": true
+    },
+    {
+      "cue_id": "S11-A1",
+      "scene_id": 10,
+      "speaker": "YUYU",
+      "text": "我也有我自己的人生。",
+      "start_second": 70.4,
+      "end_second": 73.2,
+      "voice_profile": "YUYU",
+      "require_lipsync": true
+    },
+    {
+      "cue_id": "S11-A2",
+      "scene_id": 10,
+      "speaker": "YUCHENG",
+      "text": "我只是怕失去你。",
+      "start_second": 73.5,
+      "end_second": 76.4,
+      "voice_profile": "YUCHENG",
+      "require_lipsync": true
+    },
+    {
+      "cue_id": "S12-A1",
+      "scene_id": 11,
+      "speaker": "YUCHENG",
+      "text": "我不該用付出，要求你留下。",
+      "start_second": 77.5,
+      "end_second": 80.7,
+      "voice_profile": "YUCHENG",
+      "require_lipsync": true
+    },
+    {
+      "cue_id": "S12-A2",
+      "scene_id": 11,
+      "speaker": "YUYU",
+      "text": "我也不該一直逃避。",
+      "start_second": 80.9,
+      "end_second": 83.5,
+      "voice_profile": "YUYU",
+      "require_lipsync": true
+    },
+    {
+      "cue_id": "S13-A1",
+      "scene_id": 12,
+      "speaker": "YUCHENG",
+      "text": "你一定會成為很棒的設計師。",
+      "start_second": 84.8,
+      "end_second": 89.9,
+      "voice_profile": "YUCHENG",
+      "require_lipsync": true
+    },
+    {
+      "cue_id": "S14-A1",
+      "scene_id": 13,
+      "speaker": "YUCHENG",
+      "text": "去吧。不是不愛，是不再攔你。",
+      "start_second": 91.5,
+      "end_second": 95.8,
+      "voice_profile": "YUCHENG",
+      "require_lipsync": true
+    },
+    {
+      "cue_id": "S14-A2",
+      "scene_id": 13,
+      "speaker": "NARRATOR",
+      "text": "那天我沒有追。",
+      "start_second": 96,
+      "end_second": 97.5,
+      "voice_profile": "YU_CHENG_VO",
+      "require_lipsync": false
+    },
+    {
+      "cue_id": "S15-A1",
+      "scene_id": 14,
+      "speaker": "NARRATOR",
+      "text": "一年後，我又走進了有他的雨夜。",
+      "start_second": 98.6,
+      "end_second": 104.2,
+      "voice_profile": "YU_CHENG_VO",
+      "require_lipsync": false
+    },
+    {
+      "cue_id": "S16-A1",
+      "scene_id": 15,
+      "speaker": "YUYU",
+      "text": "歡迎光……",
+      "start_second": 106,
+      "end_second": 107.9,
+      "voice_profile": "YUYU",
+      "require_lipsync": true
+    },
+    {
+      "cue_id": "S16-A2",
+      "scene_id": 15,
+      "speaker": "NARRATOR",
+      "text": "如果重逢，我們還能相愛嗎？",
+      "start_second": 108.8,
+      "end_second": 111.7,
+      "voice_profile": "YU_CHENG_VO",
+      "require_lipsync": false
+    }
+  ],
+  "sound_bed": [
+    {
+      "scene_id": 0,
+      "start_second": 0,
+      "end_second": 7,
+      "description": "雨、車聲"
+    },
+    {
+      "scene_id": 1,
+      "start_second": 7,
+      "end_second": 14,
+      "description": "雨聲、衣料摩擦"
+    },
+    {
+      "scene_id": 2,
+      "start_second": 14,
+      "end_second": 21,
+      "description": "雨漸小"
+    },
+    {
+      "scene_id": 3,
+      "start_second": 21,
+      "end_second": 28,
+      "description": "河風、輕鋼琴"
+    },
+    {
+      "scene_id": 4,
+      "start_second": 28,
+      "end_second": 35,
+      "description": "碗筷、居家環境音"
+    },
+    {
+      "scene_id": 5,
+      "start_second": 35,
+      "end_second": 42,
+      "description": "冷氣、柔和鋼琴"
+    },
+    {
+      "scene_id": 6,
+      "start_second": 42,
+      "end_second": 49,
+      "description": "剪刀收納、遠處笑聲"
+    },
+    {
+      "scene_id": 7,
+      "start_second": 49,
+      "end_second": 56,
+      "description": "時鐘、冰箱低鳴"
+    },
+    {
+      "scene_id": 8,
+      "start_second": 56,
+      "end_second": 63,
+      "description": "遠處理髮店收工聲"
+    },
+    {
+      "scene_id": 9,
+      "start_second": 63,
+      "end_second": 70,
+      "description": "低頻環境音"
+    },
+    {
+      "scene_id": 10,
+      "start_second": 70,
+      "end_second": 77,
+      "description": "音樂停止、呼吸聲"
+    },
+    {
+      "scene_id": 11,
+      "start_second": 77,
+      "end_second": 84,
+      "description": "晨鳥、慢鋼琴"
+    },
+    {
+      "scene_id": 12,
+      "start_second": 84,
+      "end_second": 91,
+      "description": "剪刀輕響"
+    },
+    {
+      "scene_id": 13,
+      "start_second": 91,
+      "end_second": 98,
+      "description": "車站廣播不含可辨文字"
+    },
+    {
+      "scene_id": 14,
+      "start_second": 98,
+      "end_second": 105,
+      "description": "雨聲再現、鋼琴一個音"
+    },
+    {
+      "scene_id": 15,
+      "start_second": 105,
+      "end_second": 112,
+      "description": "門鈴、短暫寂靜、切黑"
+    }
+  ]
+}
