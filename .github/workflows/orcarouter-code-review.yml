@@ -1,12 +1,12 @@
 name: OrcaCode Review
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
   cancel-in-progress: true
 
 on:
-  pull_request_target:
-    types: [opened, synchronize, ready_for_review]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   issue_comment:
     types: [created]
 
@@ -18,8 +18,9 @@ permissions:
 jobs:
   review:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: |
-      github.event_name == 'pull_request_target' ||
+      github.event_name == 'pull_request' ||
       (github.event_name == 'issue_comment' &&
         github.event.issue.pull_request &&
         (startsWith(github.event.comment.body, '/orcacode-review') ||
@@ -30,6 +31,58 @@ jobs:
           startsWith(github.event.comment.body, '@orcacode review ')) &&
         contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
     steps:
-      - uses: Continuum-AI-Corp/orca-code-review@v1
+      # Do not check out or execute PR files before establishing this boundary.
+      # A denied/misconfigured review must fail, never silently pass the gate.
+      - name: Validate review eligibility
+        env:
+          REVIEW_API_KEY: ${{ secrets.ORCAROUTER_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as stream:
+              event = json.load(stream)
+          repository = os.environ["GITHUB_REPOSITORY"]
+          trusted = {"OWNER", "MEMBER", "COLLABORATOR"}
+          if os.environ["GITHUB_EVENT_NAME"] == "pull_request":
+              pr = event["pull_request"]
+              if pr.get("draft"):
+                  raise SystemExit("Review deferred: mark this draft ready for review.")
+              if pr.get("author_association") not in trusted:
+                  raise SystemExit("Automatic review requires a trusted PR author.")
+          else:
+              if event["comment"].get("author_association") not in trusted:
+                  raise SystemExit("On-demand review requires a trusted maintainer.")
+              number = int(event["issue"]["number"])
+              request = urllib.request.Request(
+                  f"https://api.github.com/repos/{repository}/pulls/{number}",
+                  headers={"Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                           "Accept": "application/vnd.github+json"},
+              )
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  pr = json.load(response)
+          if pr.get("state") != "open":
+              raise SystemExit("Review requires an open pull request.")
+          if (pr.get("head", {}).get("repo") or {}).get("full_name") != repository:
+              raise SystemExit("Fork reviews require a separately approved review path.")
+          if not os.environ.get("REVIEW_API_KEY", "").strip():
+              raise SystemExit("Missing repository secret ORCAROUTER_API_KEY.")
+          print("Review eligibility verified; no PR code has been executed.")
+          PY
+
+      - name: Review pull request
+        # Verified upstream v1 commit; do not follow a mutable tag.
+        uses: Continuum-AI-Corp/orca-code-review@6d253e0399c84848fedc8801176d6bea77817762
         with:
           orcarouter-api-key: ${{ secrets.ORCAROUTER_API_KEY }}
+          settings: "false"
+          block-on: "P0,P1"
+          on-oversized-diff: "fail"
+          auto-review-authors: "OWNER,MEMBER,COLLABORATOR"
+          engine-version: "1.3.13"
+          concurrency: "4"
+          timeout-minutes: "10"
