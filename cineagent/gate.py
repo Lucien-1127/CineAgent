@@ -110,18 +110,23 @@ def parse_report(text: str) -> GateReport:
     return report
 
 
-def weighted_score(report: GateReport) -> float:
-    total = sum(WEIGHTS[k] * getattr(report, k) for k in WEIGHTS)
-    return round(total / 100.0, 4)
+def weighted_score(report: GateReport, with_character: bool = True) -> float:
+    """Weighted 0-1 score. Identity/wardrobe drop out when no character is on screen."""
+    weights = dict(WEIGHTS)
+    if not with_character:
+        weights = {k: v for k, v in weights.items() if k not in ("identity", "wardrobe")}
+    total_weight = sum(weights.values()) or 1.0
+    total = sum(w * getattr(report, k) for k, w in weights.items())
+    return round(total / total_weight / 100.0, 4)
 
 
 def decision_actions(report: GateReport, score: float,
-                     policy: GatePolicy) -> list[str]:
+                     policy: GatePolicy, with_character: bool = True) -> list[str]:
     actions: list[str] = []
-    if report.identity / 100.0 < policy.min_identity:
+    if with_character and report.identity / 100.0 < policy.min_identity:
         actions.append("re-anchor: regenerate the still from the master anchor and rebuild the chain")
         actions.append("raise cfg_scale to 0.7 so the video model hugs the frame")
-    if report.wardrobe < 70:
+    if with_character and report.wardrobe < 70:
         actions.append("inject the wardrobe clause verbatim into the image prompt")
     if report.palette < 70:
         actions.append("pin the colour grade in the image prompt (palette tokens) and keep motion prompt colour-free")
@@ -135,10 +140,10 @@ def decision_actions(report: GateReport, score: float,
 
 
 def decide(report: GateReport, policy: GatePolicy = GatePolicy(),
-           attempt: int = 0) -> Decision:
-    score = weighted_score(report)
+           attempt: int = 0, with_character: bool = True) -> Decision:
+    score = weighted_score(report, with_character)
     reasons: list[str] = []
-    if report.identity / 100.0 < policy.min_identity:
+    if with_character and report.identity / 100.0 < policy.min_identity:
         reasons.append(f"identity {report.identity:.0f} < {policy.min_identity * 100:.0f}")
     if score < policy.min_total:
         reasons.append(f"weighted {score:.2f} < {policy.min_total:.2f}")
@@ -148,19 +153,24 @@ def decide(report: GateReport, policy: GatePolicy = GatePolicy(),
     if not reasons:
         return Decision("accept", score, ["all axes above threshold"], [])
 
-    actions = decision_actions(report, score, policy)
+    actions = decision_actions(report, score, policy, with_character)
     if attempt >= policy.max_retries:
         return Decision("escalate", score, reasons + ["retry budget exhausted"], actions)
     return Decision("retry", score, reasons, actions)
 
 
 def gate_messages(reference_image: str, frame_images: Iterable[str],
-                  shot_note: str = "", motion_prompt: str = "") -> list[dict]:
+                  shot_note: str = "", motion_prompt: str = "",
+                  with_character: bool = True) -> list[dict]:
     """Build the chat payload; image paths are turned into data URIs upstream."""
     from .providers import image_content  # local import keeps module import-light
 
     frames = list(frame_images)[:4]
     parts: list[dict] = [{"type": "text", "text": RUBRIC}]
+    if not with_character:
+        parts.append({"type": "text", "text":
+                      "This shot contains NO human or character. Set identity and "
+                      "wardrobe to 100 and judge only palette, framing and motion."})
     parts.append({"type": "text", "text": f"REFERENCE (approved identity): {shot_note or 'anchor'}"})
     parts.append(image_content(reference_image))
     parts.append({"type": "text", "text": "FRAMES (start / middle / end of the shot):"})

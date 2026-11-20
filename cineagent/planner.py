@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Iterable
 
 from .beatsheet import BeatSheet, Shot, compute_rhythm
@@ -199,6 +199,38 @@ def audit(beat: BeatSheet) -> list[str]:
     return list(dict.fromkeys(problems))
 
 
+def _reconcile_count(shots: list[Shot], wanted: int) -> list[Shot]:
+    """Force the plan to exactly ``wanted`` shots without dropping story beats.
+
+    Too many shots: the excess is merged into its predecessor (duration added).
+    Too few: the longest shot is split in half and the clone gets the next move
+    in the rotation, so a 1-shot request can never balloon into two static beats.
+    """
+    if wanted <= 0 or not shots:
+        return shots
+    while len(shots) > wanted:
+        extra = shots.pop()
+        shots[-1].duration = round(min(15.0, shots[-1].duration + extra.duration), 1)
+    guard = 0
+    while len(shots) < wanted and guard < 40:
+        guard += 1
+        i = max(range(len(shots)), key=lambda k: shots[k].duration)
+        src = shots[i]
+        half = round(src.duration / 2, 1)
+        if half < 3.0:
+            break  # cannot split without violating the 3s floor
+        clone = replace(src, duration=half, index=src.index,
+                        camera_move=ROTATION[(ROTATION.index(src.camera_move)
+                                              + 1) % len(ROTATION)]
+                        if src.camera_move in ROTATION else "static",
+                        notes=(src.notes + " (split)")[:140])
+        src.duration = half
+        shots.insert(i + 1, clone)
+    for n, shot in enumerate(shots, start=1):
+        shot.index = n
+    return shots
+
+
 def _skeleton(brief: str, total: float, count: int) -> dict:
     """Deterministic 5-function skeleton — never flat, no model required."""
     count = max(2, count)
@@ -304,7 +336,7 @@ class Planner:
 
         beat, character, style_out, negative = self._to_beat(data, brief, total,
                                                               aspect_ratio, style,
-                                                              reference)
+                                                              reference, shot_count)
         repairs = 0
         problems = audit(beat)
         while problems and self.chat is not None and repairs < 2:
@@ -319,7 +351,7 @@ class Planner:
             if fixed is None:
                 break
             beat, character, style_out, negative = self._to_beat(
-                fixed, brief, total, aspect_ratio, style, reference)
+                fixed, brief, total, aspect_ratio, style, reference, shot_count)
             problems = audit(beat)
 
         fixes = enforce_variety(beat)
@@ -341,7 +373,8 @@ class Planner:
             return None
 
     def _to_beat(self, data: dict, brief: str, total: float, aspect: str,
-                 style: str, reference: BeatSheet | None
+                 style: str, reference: BeatSheet | None,
+                 wanted: int | None = None
                  ) -> tuple[BeatSheet, dict, str, str]:
         shots: list[Shot] = []
         for i, raw in enumerate(data.get("shots", []), start=1):
@@ -363,7 +396,12 @@ class Planner:
                 notes=str(raw.get("turn", ""))[:140],
             ))
         if not shots:
-            shots = [Shot.from_dict(s) for s in _skeleton(brief, total, 4)["shots"]]
+            shots = [Shot.from_dict(s) for s in _skeleton(brief, total, wanted or 4)["shots"]]
+
+        # A model that returns 7 shots for "--shots 5" silently breaks the chain
+        # budget; reconcile the count deterministically before normalising time.
+        if wanted:
+            shots = _reconcile_count(shots, wanted)
 
         # normalise total to the request (proportional, respecting 3-15s)
         current = sum(s.duration for s in shots)
@@ -371,6 +409,11 @@ class Planner:
             scale = total / current
             for shot in shots:
                 shot.duration = round(max(3.0, min(15.0, shot.duration * scale)), 1)
+        drift = round(total - sum(s.duration for s in shots), 1)
+        if abs(drift) >= 0.1 and shots:
+            target = max(range(len(shots)), key=lambda i: shots[i].duration)
+            shots[target].duration = round(
+                max(3.0, min(15.0, shots[target].duration + drift)), 1)
 
         style_out = str(data.get("style", "") or style or
                         (reference.visual_style if reference else ""))

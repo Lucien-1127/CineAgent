@@ -13,6 +13,7 @@ Outputs under ``output/<run_id>/``:
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -25,6 +26,21 @@ from .beatsheet import BeatSheet
 from .planner import Planner, PlanResult, audit
 from .providers import Chat, MultiImages, OpenRouterVideo, OrcaVideo, ProviderError
 from .routing import Router, RoutingError, snap_duration
+
+
+NO_CHARACTER_RE = re.compile(
+    r"\bno (?:people|person|character|human|one|figures?)\b"
+    r"|\bempty (?:alley|alleyway|street|road|room|corridor|platform|hall|lot|space|lot|city|landscape|frame|shot)\b"
+    r"|無人|沒有人|空無一人|沒半個人",
+    re.IGNORECASE)
+
+
+def shot_has_character(shot, canonical: str) -> bool:
+    """Gate the identity axis only when a person is actually supposed to be on screen."""
+    blob = f"{shot.subject} {shot.action} {shot.setting}"
+    if NO_CHARACTER_RE.search(blob):
+        return False
+    return bool((canonical or "").strip())
 
 
 @dataclass
@@ -155,23 +171,31 @@ class Pipeline:
             paths.append(str(dest))
         return paths
 
+    def shot_has_character(self, shot, anchor) -> bool:
+        return shot_has_character(shot, getattr(anchor, "canonical", ""))
+
     # ── stage C ──────────────────────────────────────────────────────────────
     def gate_shot(self, video: Path, reference: Path, shot_duration: float,
-                  motion_prompt: str, workdir: Path) -> tuple[gate_mod.Decision, gate_mod.GateReport | None]:
+                  motion_prompt: str, workdir: Path,
+                  with_character: bool = True, attempt: int = 0
+                  ) -> tuple[gate_mod.Decision, gate_mod.GateReport | None]:
         if self.cfg.dry_run:
             return gate_mod.Decision("accept", 1.0, ["dry-run"], []), None
         times = [0.2, shot_duration / 2, max(0.3, shot_duration - 0.2)]
         frames = [str(p) for p in media.sample_frames(
             video, times, workdir / "frames", prefix=video.stem)]
         messages = gate_mod.gate_messages(str(reference), frames,
-                                          shot_note=video.stem, motion_prompt=motion_prompt)
+                                          shot_note=video.stem,
+                                          motion_prompt=motion_prompt,
+                                          with_character=with_character)
         try:
             reply = self.vlm().complete(messages, temperature=0.1, max_tokens=700, json_mode=True)
             report = gate_mod.parse_report(reply)
         except Exception as exc:
             print(f"     ⚠️  gate unavailable ({exc}) — accepting without verification")
             return gate_mod.Decision("accept", 0.0, [f"gate error: {exc}"], []), None
-        return gate_mod.decide(report, self.cfg.gate, attempt=0), report
+        return gate_mod.decide(report, self.cfg.gate, attempt=attempt,
+                               with_character=with_character), report
 
     def render_shot(self, shot, chain, beat: BeatSheet, sheet: AnchorSheet,
                     run_dir: Path, attempt: int = 0) -> Path:
@@ -294,6 +318,7 @@ class Pipeline:
                     print(f"     🔗 carry: frame from shot {shot.index - 1} → first frame")
                 except media.MediaError as exc:
                     print(f"     ⚠️  carry frame failed: {exc}")
+            has_char = self.shot_has_character(shot, anchor)
             while attempts <= self.cfg.gate.max_retries:
                 try:
                     path = self.render_shot(shot, chain, beat, sheet, run_dir, attempts)
@@ -303,21 +328,25 @@ class Pipeline:
                     break
                 decision, report_obj = self.gate_shot(
                     path, Path(chain.first_frame or anchor_still), shot.duration,
-                    prompts.build_motion_prompt(shot), run_dir)
+                    prompts.build_motion_prompt(shot), run_dir,
+                    with_character=has_char, attempt=attempts)
                 print(f"     🔎 gate: {decision.verdict} {decision.score:.2f} "
                       f"{decision.reasons}")
                 if decision.verdict == "accept":
                     break
-                attempts += 1
-                if decision.verdict == "escalate":
+                if decision.verdict == "escalate" or attempts >= self.cfg.gate.max_retries:
                     break
+                attempts += 1
                 self.retry_adjust(shot, attempts, report_obj, decision)
 
             if path and path.exists():
                 rendered.append(str(path))
-                try:
-                    durations[shot.index] = media.probe(path)["duration"]
-                except media.MediaError:
+                if not self.cfg.dry_run:
+                    try:
+                        durations[shot.index] = media.probe(path)["duration"]
+                    except media.MediaError:
+                        durations[shot.index] = shot.duration
+                else:
                     durations[shot.index] = shot.duration
             shot_reports.append({
                 "shot": shot.index,
@@ -338,6 +367,12 @@ class Pipeline:
             except media.MediaError as exc:
                 print(f"  ⚠️  concat failed: {exc}")
 
+        accepted = (all((r.get("decision") or {}).get("verdict") == "accept"
+                        for r in shot_reports) and bool(shot_reports)
+                    and not self.cfg.dry_run)
+        rejected = [r["shot"] for r in shot_reports
+                    if (r.get("decision") or {}).get("verdict") != "accept"]
+
         report.update({
             "plan": beat.to_dict(),
             "audit": problems,
@@ -346,6 +381,8 @@ class Pipeline:
             "chain_mode": self.cfg.chain_mode,
             "seams": seams,
             "shots": shot_reports,
+            "accepted": accepted,
+            "rejected_shots": rejected,
             "gate_summary": gate_mod.summarise(
                 [gate_mod.GateReport(**r["gate"]) for r in shot_reports if r["gate"]]
             ),
@@ -365,6 +402,9 @@ class Pipeline:
                  f"chain: {report['chain_mode']} / seams: {report['seams']['locked_seams']} locked",
                  f"audit: {report['audit'] or 'clean'}",
                  f"gate: {report['gate_summary']}",
+                 f"accepted: {report.get('accepted')}"
+                 + (f" (rejected shots: {report.get('rejected_shots')})"
+                    if report.get("rejected_shots") else ""),
                  "", "shots:"]
         for row in report["shots"]:
             verdict = (row.get("decision") or {}).get("verdict", "n/a")

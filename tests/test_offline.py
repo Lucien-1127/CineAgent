@@ -12,7 +12,8 @@ from __future__ import annotations
 import json
 import unittest
 
-from cineagent import gate, prompts, routing
+from cineagent import gate, prompts, routing, pipeline, beatsheet
+from cineagent import planner as planner_mod
 from cineagent.anchor import CharacterAnchor, AnchorSheet, plan_chain, seam_report, verify_chain
 from cineagent.beatsheet import BeatSheet, Shot
 from cineagent.planner import Planner, _skeleton, audit, enforce_variety
@@ -167,6 +168,60 @@ class GateTests(unittest.TestCase):
         reports = [gate.GateReport(identity=90, wardrobe=60, palette=90,
                                    framing=90, motion=90)]
         self.assertEqual(gate.summarise(reports)["worst_axis"], "wardrobe")
+
+    def test_no_character_drops_identity_axis(self):
+        # a no-people shot must not be failed for "identity 0"
+        report = gate.GateReport(identity=0, wardrobe=0, palette=90,
+                                 framing=90, motion=84, verdict="accept")
+        self.assertEqual(gate.weighted_score(report, with_character=False), 0.885)
+        decision = gate.decide(report, gate.GatePolicy(), attempt=0, with_character=False)
+        self.assertEqual(decision.verdict, "accept")
+        self.assertFalse(any("re-anchor" in a for a in decision.actions))
+
+    def test_character_shot_still_judges_identity(self):
+        report = gate.GateReport(identity=0, wardrobe=90, palette=90,
+                                 framing=90, motion=90, verdict="accept")
+        decision = gate.decide(report, gate.GatePolicy(), attempt=0, with_character=True)
+        self.assertEqual(decision.verdict, "retry")
+
+
+class CharacterDetectionTests(unittest.TestCase):
+    def _shot(self, subject, action="", setting=""):
+        return beatsheet.Shot(index=1, duration=5.0, subject=subject,
+                              action=action, setting=setting)
+
+    def test_detects_empty_plate(self):
+        shot = self._shot("a rain-slicked neon alley", "camera drifts", "no people")
+        self.assertFalse(pipeline.shot_has_character(shot, "a courier"))
+        shot = self._shot("空無一人的街道", "推進", "")
+        self.assertFalse(pipeline.shot_has_character(shot, "外送員"))
+
+    def test_detects_character_shot(self):
+        shot = self._shot("a courier in a yellow raincoat", "pushes the door")
+        self.assertTrue(pipeline.shot_has_character(shot, "a courier in a yellow raincoat"))
+
+    def test_no_anchor_means_no_identity_gate(self):
+        shot = self._shot("a courier", "walks")
+        self.assertFalse(pipeline.shot_has_character(shot, ""))
+
+
+class ShotCountTests(unittest.TestCase):
+    def test_merges_excess_shots(self):
+        shots = [Shot(index=i, duration=10.0) for i in (1, 2, 3)]
+        out = planner_mod._reconcile_count(shots, 1)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].duration, 15.0)  # capped, not 30
+
+    def test_splits_short_plans(self):
+        out = planner_mod._reconcile_count([Shot(index=1, duration=12.0)], 2)
+        self.assertEqual(len(out), 2)
+        self.assertAlmostEqual(sum(s.duration for s in out), 12.0, places=1)
+        self.assertEqual([s.index for s in out], [1, 2])
+
+    def test_no_llm_plan_honours_requested_shape(self):
+        result = Planner(chat=None).plan("a courier in the rain", total=5.0, shot_count=1)
+        self.assertEqual(len(result.beat.shots), 1)
+        self.assertAlmostEqual(sum(s.duration for s in result.beat.shots), 5.0, places=1)
 
 
 class PlannerTests(unittest.TestCase):

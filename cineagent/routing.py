@@ -314,7 +314,11 @@ class Router:
     def catalog(self, provider: str) -> dict:
         if provider not in self._catalogs:
             try:
-                self._catalogs[provider] = fetch_catalog(provider, self.refresh)
+                data = fetch_catalog(provider, self.refresh)
+                # A stale/empty on-disk cache must never disable the whole router.
+                if not data:
+                    data = fetch_catalog(provider, True)
+                self._catalogs[provider] = data
             except (RoutingError, urllib.error.URLError, urllib.error.HTTPError,
                     json.JSONDecodeError) as exc:
                 self._catalogs[provider] = {}

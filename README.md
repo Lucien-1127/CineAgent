@@ -72,6 +72,13 @@ energy curve: [2, 3, 4, 5, 3]
   `split` 值約 0.63–0.70，代表 6-7 成 token 花在靜態（圖負責長相、影片負責動作）。
 * `gate.py` 五軸：identity 0.40 / wardrobe 0.20 / palette 0.15 / framing 0.15 / motion 0.10，
   門檻 `min_total=0.82`、`min_identity=0.80`；不過就 retry（最多 2 次）後 escalate。
+* **沒有人物的鏡頭不判 identity**：`shot_has_character()` 從 subject/action/setting 判讀
+  （`no people`、`empty alley`、`無人`…），命中就把 identity/wardrobe 權重移除後重新歸一，
+  只在 palette/framing/motion 上評分——否則空景永遠卡在 identity 0 分而無限 retry。
+* `report.json` 另有 `accepted` 與 `rejected_shots`：concat 出 `final.mp4` **不等於**驗收通過，
+  被 retry/escalate 的鏡頭會列在 `rejected_shots`，SUMMARY 也會寫 `accepted: False`。
+* VLM 不可用時走 fail-open（記 `gate error`、score 0.0），避免整條片被基礎設施卡死；
+  這種鏡頭在 report 裡沒有分數，不能當成「已驗收」。
 
 ---
 
@@ -132,6 +139,19 @@ python3 run_pipeline.py run --brief "..." --shots 3 --chain-mode carry \
 > **現況**：影片與 VLM 通了，生圖被上游 503／餘額 402 卡住。因此
 > `--chain-mode carry --anchor-image <已批准母圖>` 是現在唯一能跑完整條片的路徑；
 > 生圖恢復後 `bridge` 自動可用（`MultiImages` 依序試 imagen → gemini-image → gpt-image）。
+
+**一次完整實跑（單鏡、carry、$0.112 模型）的誠實結果**：
+
+```
+plan 1 shot / 5.0s, gate retry 0.67 → 0.75 → 0.72, attempts=3
+axes identity 68 / wardrobe 90 / palette 88 / framing 55 / motion 50
+final.mp4 產出但 accepted: False
+```
+
+兩件事要分清：`final.mp4` 有產出（管線沒斷），但**驗收沒過**——VLM 判 framing/motion 太弱，
+因為該次 prompt 要求 dolly-in、實際畫面幾乎沒推進。這是 gate 該做的事，不是 bug；
+重跑時把 motion_prompt 寫成可觀測的位移（例如 `dolly in 2 m over 5 s, foreground parallax`）
+或換 `kling-v3-omni` 的 `camera_control` 才會過。
 
 ---
 
