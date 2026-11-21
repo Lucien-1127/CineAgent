@@ -1,1 +1,1 @@
-httpx>=0.27.0
+httpx>=0.27.0  # only needed by archive/run_pipeline_v34.py (v4 CLI is stdlib-only)
