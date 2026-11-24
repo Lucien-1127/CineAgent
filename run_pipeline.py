@@ -136,7 +136,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     report = pipe.run(args.brief, duration=args.duration, shots=args.shots,
                       style=args.style or "", character_hint=args.character or "")
     print(pipe.summary_text(report))
-    return 0 if report.get("final") or cfg.dry_run else 1
+    return 0 if report.get("accepted") or cfg.dry_run else 1
 
 
 def cmd_smoke(args: argparse.Namespace) -> int:
