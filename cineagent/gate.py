@@ -13,6 +13,7 @@ notice first.
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Iterable
@@ -30,7 +31,7 @@ Score each axis 0-100. Be harsh; 100 means indistinguishable from the reference.
 - wardrobe: same clothing items, colours, fit, accessories
 - palette: same colour grade / lighting mood as the reference
 - framing: does the shot actually look like the intended framing
-- motion: are the frames plausibly one continuous camera move (no cuts, no jumps)
+- motion: does the observed motion match the intended camera AND subject action, without cuts, jumps or morphing? Do not reward mere camera zoom when a subject action is requested. Three frames cannot establish acting or lip sync; do not claim that they do.
 
 Return ONLY JSON:
 {"identity":0-100,"wardrobe":0-100,"palette":0-100,"framing":0-100,
@@ -64,6 +65,8 @@ class GatePolicy:
     min_identity: float = 0.80
     max_retries: int = 2
     escalate_after: int = 2
+    min_motion: float = 0.70
+    min_framing: float = 0.70
 
 
 @dataclass
@@ -102,10 +105,15 @@ def parse_report(text: str) -> GateReport:
         data = json.loads(blob2)
     report = GateReport(raw=text)
     for axis in WEIGHTS:
-        setattr(report, axis, max(0.0, min(100.0, _coerce_number(data.get(axis)))))
+        value = data.get(axis)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= 100:
+            raise ValueError(f"invalid or missing gate axis: {axis}")
+        setattr(report, axis, float(value))
     issues = data.get("issues") or []
     report.issues = [str(i) for i in issues][:8]
     report.verdict = str(data.get("verdict", "")).lower()
+    if report.verdict not in {"accept", "retry", "reject"}:
+        raise ValueError("invalid or missing model verdict")
     report.notes = str(data.get("notes", ""))[:300]
     return report
 
@@ -145,6 +153,10 @@ def decide(report: GateReport, policy: GatePolicy = GatePolicy(),
     reasons: list[str] = []
     if with_character and report.identity / 100.0 < policy.min_identity:
         reasons.append(f"identity {report.identity:.0f} < {policy.min_identity * 100:.0f}")
+    if report.motion / 100.0 < policy.min_motion:
+        reasons.append(f"motion {report.motion:.0f} < {policy.min_motion * 100:.0f}")
+    if report.framing / 100.0 < policy.min_framing:
+        reasons.append(f"framing {report.framing:.0f} < {policy.min_framing * 100:.0f}")
     if score < policy.min_total:
         reasons.append(f"weighted {score:.2f} < {policy.min_total:.2f}")
     if report.verdict in ("reject", "retry") and not reasons:

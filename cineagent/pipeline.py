@@ -13,6 +13,7 @@ Outputs under ``output/<run_id>/``:
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 import uuid
@@ -65,7 +66,7 @@ class Pipeline:
         self.cfg = config or Config()
         self.router = router or Router()
         self._vlm: Chat | None = None
-        self._images: OrcaImages | None = None
+        self._images: MultiImages | None = None
 
     # ── clients ──────────────────────────────────────────────────────────────
     def vlm(self) -> Chat:
@@ -181,19 +182,24 @@ class Pipeline:
                   ) -> tuple[gate_mod.Decision, gate_mod.GateReport | None]:
         if self.cfg.dry_run:
             return gate_mod.Decision("accept", 1.0, ["dry-run"], []), None
-        times = [0.2, shot_duration / 2, max(0.3, shot_duration - 0.2)]
-        frames = [str(p) for p in media.sample_frames(
-            video, times, workdir / "frames", prefix=video.stem)]
-        messages = gate_mod.gate_messages(str(reference), frames,
-                                          shot_note=video.stem,
-                                          motion_prompt=motion_prompt,
-                                          with_character=with_character)
         try:
+            actual = media.probe(video)["duration"]
+            if not math.isfinite(actual) or actual <= 0:
+                raise ValueError("invalid video duration")
+            times = [actual * fraction for fraction in (0.1, 0.5, 0.9)]
+            frames = [str(p) for p in media.sample_frames(
+                video, times, workdir / "frames", prefix=video.stem)]
+            if len(frames) != 3 or not all(Path(p).is_file() and Path(p).stat().st_size > 0 for p in frames):
+                raise ValueError("missing frame evidence")
+            messages = gate_mod.gate_messages(str(reference), frames,
+                                              shot_note=video.stem,
+                                              motion_prompt=motion_prompt,
+                                              with_character=with_character)
             reply = self.vlm().complete(messages, temperature=0.1, max_tokens=700, json_mode=True)
             report = gate_mod.parse_report(reply)
         except Exception as exc:
-            print(f"     ⚠️  gate unavailable ({exc}) — accepting without verification")
-            return gate_mod.Decision("accept", 0.0, [f"gate error: {exc}"], []), None
+            print(f"     ⚠️  gate unavailable ({type(exc).__name__}) — unverified")
+            return gate_mod.Decision("escalate", 0.0, [f"gate error: {type(exc).__name__}"], []), None
         return gate_mod.decide(report, self.cfg.gate, attempt=attempt,
                                with_character=with_character), report
 
@@ -201,7 +207,6 @@ class Pipeline:
                     run_dir: Path, attempt: int = 0) -> Path:
         anchor = sheet.primary()
         motion = prompts.build_motion_prompt(shot)
-        client, spec = self.video_client()
         dest = run_dir / "shots" / f"shot_{shot.index:02d}_a{attempt}.mp4"
 
         if self.cfg.dry_run:
@@ -209,6 +214,7 @@ class Pipeline:
             dest.write_bytes(b"DRY-RUN")
             return dest
 
+        client, spec = self.video_client()
         if isinstance(client, OpenRouterVideo):
             payload = client.build_payload(
                 motion, duration=snap_duration(spec, shot.duration),
@@ -304,6 +310,8 @@ class Pipeline:
         shot_reports = []
         rendered: list[str] = []
         durations: dict[int, float] = {}
+        media_errors: list[str] = []
+        requested_duration = float(duration)
         for shot, chain in zip(beat.shots, chains):
             print(f"\n  🎬 shot {shot.index}: {shot.framing} {shot.camera_move} "
                   f"{shot.duration}s — {shot.action[:60]}")
@@ -345,7 +353,7 @@ class Pipeline:
                     try:
                         durations[shot.index] = media.probe(path)["duration"]
                     except media.MediaError:
-                        durations[shot.index] = shot.duration
+                        media_errors.append(f"shot {shot.index}: probe failed")
                 else:
                     durations[shot.index] = shot.duration
             shot_reports.append({
@@ -359,16 +367,29 @@ class Pipeline:
             })
 
         final = ""
-        if rendered and not self.cfg.dry_run:
+        if len(rendered) == shots == len(beat.shots) == len(shot_reports) and shots > 0 and not self.cfg.dry_run:
             try:
                 out = media.concat(rendered, run_dir / "final.mp4")
+                info = media.probe(out)
+                actual_duration = info["duration"]
+                if (not math.isfinite(actual_duration) or actual_duration <= 0
+                        or not info["width"] or not info["height"]):
+                    raise ValueError("invalid final media")
                 final = str(out)
-                print(f"\n  ✅ final: {out}")
-            except media.MediaError as exc:
-                print(f"  ⚠️  concat failed: {exc}")
+                if abs(actual_duration - requested_duration) > 0.5:
+                    media_errors.append("final duration differs from requested duration by >0.5s")
+                print(f"\n  review candidate: {out}")
+            except (media.MediaError, OSError, ValueError) as exc:
+                media_errors.append(f"concat/probe failed: {type(exc).__name__}")
+        elif not self.cfg.dry_run:
+            media_errors.append("missing rendered shots; no final concat")
 
-        accepted = (all((r.get("decision") or {}).get("verdict") == "accept"
-                        for r in shot_reports) and bool(shot_reports)
+        accepted = (bool(final) and not media_errors and not problems
+                    and not seams["problems"]
+                    and len(shot_reports) == shots and shots > 0
+                    and all(r.get("gate") is not None
+                            and (r.get("decision") or {}).get("verdict") == "accept"
+                            for r in shot_reports)
                     and not self.cfg.dry_run)
         rejected = [r["shot"] for r in shot_reports
                     if (r.get("decision") or {}).get("verdict") != "accept"]
@@ -381,7 +402,14 @@ class Pipeline:
             "chain_mode": self.cfg.chain_mode,
             "seams": seams,
             "shots": shot_reports,
-            "accepted": accepted,
+            "accepted": accepted,  # technical shot/media acceptance only
+            "delivery_status": ("NOT_RUN" if self.cfg.dry_run else
+                                "REVIEW_REQUIRED" if accepted else "BLOCKED"),
+            "performance_review": {"status": "NOT_RUN", "required": [
+                "story_comprehension", "facial_expression", "body_acting",
+                "action_causality", "cross_shot_continuity", "audio_lip_sync",
+                "brief_alignment"]},
+            "media_errors": media_errors,
             "rejected_shots": rejected,
             "gate_summary": gate_mod.summarise(
                 [gate_mod.GateReport(**r["gate"]) for r in shot_reports if r["gate"]]
@@ -402,7 +430,9 @@ class Pipeline:
                  f"chain: {report['chain_mode']} / seams: {report['seams']['locked_seams']} locked",
                  f"audit: {report['audit'] or 'clean'}",
                  f"gate: {report['gate_summary']}",
-                 f"accepted: {report.get('accepted')}"
+                 f"delivery: {report.get('delivery_status', 'NOT_RUN')}",
+                 f"media errors: {report.get('media_errors', [])}",
+                 f"technical accepted: {report.get('accepted')}"
                  + (f" (rejected shots: {report.get('rejected_shots')})"
                     if report.get("rejected_shots") else ""),
                  "", "shots:"]

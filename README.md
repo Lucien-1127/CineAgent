@@ -77,8 +77,9 @@ energy curve: [2, 3, 4, 5, 3]
   只在 palette/framing/motion 上評分——否則空景永遠卡在 identity 0 分而無限 retry。
 * `report.json` 另有 `accepted` 與 `rejected_shots`：concat 出 `final.mp4` **不等於**驗收通過，
   被 retry/escalate 的鏡頭會列在 `rejected_shots`，SUMMARY 也會寫 `accepted: False`。
-* VLM 不可用時走 fail-open（記 `gate error`、score 0.0），避免整條片被基礎設施卡死；
-  這種鏡頭在 report 裡沒有分數，不能當成「已驗收」。
+* VLM／抽幀／評分資料不完整時走 fail-closed，標記 `escalate`，不因驗收服務失效而付費重試。
+* motion 與 framing 各有 70 分獨立底線。完整鏡頭、最終媒體探測與目標時長（±0.5 秒）均須通過；缺片不合片。
+* `accepted` 只代表技術鏡頭與媒體驗收。`delivery_status=REVIEW_REQUIRED` 仍需敘事、表演、聲音與內容對齊的人工驗收；目前沒有自動口型同步驗收。未通過技術驗收的 `run` 回傳非零退出碼。
 
 ---
 
